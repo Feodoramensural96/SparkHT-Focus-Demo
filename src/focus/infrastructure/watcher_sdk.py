@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from collections.abc import AsyncIterator, Callable
@@ -13,6 +14,10 @@ from watcherobot import WatcheRobot
 from focus.models import CapturedFrame
 
 
+MAX_SDK_AUDIO_STREAM_BYTES = 4 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
 class WatcheRobotAdapter:
     """Thin async adapter that owns exactly one WatcheRobot SDK connection."""
 
@@ -23,18 +28,18 @@ class WatcheRobotAdapter:
         discovery_port: int = 37021,
         websocket_port: int = 8766,
         host: str = "auto",
-        followup_audio_block_bytes: int = 24_000,
         robot_factory: Callable[..., Any] = WatcheRobot.connect,
     ) -> None:
         self._pairing_code = pairing_code
         self.discovery_port = discovery_port
         self.websocket_port = websocket_port
         self.host = host
-        self.followup_audio_block_bytes = followup_audio_block_bytes
         self._factory = robot_factory
         self._robot: Any | None = None
         self._connect_lock = asyncio.Lock()
         self._playback_lock = asyncio.Lock()
+        self._animation_lock = asyncio.Lock()
+        self._animation_id: str | None = None
         self._microphone_session: Any | None = None
         self._microphone_pause_requested = asyncio.Event()
         self._microphone_paused = asyncio.Event()
@@ -65,10 +70,12 @@ class WatcheRobotAdapter:
                 host=self.host,
                 timeout=30.0,
             )
+            self._animation_id = None
 
     async def close(self) -> None:
         self._microphone_resume.set()
         robot, self._robot = self._robot, None
+        self._animation_id = None
         if robot is not None:
             await asyncio.to_thread(robot.close)
 
@@ -144,30 +151,27 @@ class WatcheRobotAdapter:
                 self._microphone_paused.set()
 
     async def play_pcm(self, chunks: AsyncIterator[bytes]) -> None:
-        """Start the first SDK stream as soon as its PCM chunk arrives.
+        """Buffer one short TTS reply and play it as one continuous SDK stream.
 
-        Protocol v1 requires total bytes and SHA before each stream, so generated chunks
-        are played as short sequential SDK streams instead of buffering the whole reply.
+        Protocol v1 requires total bytes and SHA before a stream starts. Starting one
+        stream per HTTP chunk inserts a robot-side transition between chunks, so the
+        complete reply is buffered in memory and submitted once. Voice replies are
+        capped at 60 Chinese characters and fit comfortably under the SDK's 4 MiB limit.
         """
         async with self._playback_lock:
             robot = self._require_robot()
             resume_microphone = await self._pause_microphone_for_playback()
             self.last_playback_started_at = None
             try:
-                first = True
                 buffered = bytearray()
                 async for chunk in chunks:
                     if not chunk:
                         continue
-                    if first:
-                        await self._play_block(robot, chunk)
-                        first = False
-                        continue
                     buffered.extend(chunk)
-                    while len(buffered) >= self.followup_audio_block_bytes:
-                        block = bytes(buffered[: self.followup_audio_block_bytes])
-                        del buffered[: self.followup_audio_block_bytes]
-                        await self._play_block(robot, block)
+                    if len(buffered) > MAX_SDK_AUDIO_STREAM_BYTES:
+                        raise ValueError(
+                            "TTS reply exceeds the 4 MiB WatcheRobot SDK stream limit"
+                        )
                 if buffered:
                     await self._play_block(robot, bytes(buffered))
             finally:
@@ -177,6 +181,33 @@ class WatcheRobotAdapter:
 
     async def stop_audio(self) -> None:
         await asyncio.to_thread(self._require_robot().audio.stop)
+
+    async def play_animation(self, animation_id: str) -> bool:
+        """Play one robot-installed animation without blocking the main pipeline.
+
+        Starting another animation in firmware preempts the previous animation
+        job. Repeated identical semantic states are deduplicated here.
+        """
+        if not animation_id:
+            raise ValueError("animation_id must not be empty")
+        async with self._animation_lock:
+            robot = self._require_robot()
+            supports = getattr(robot, "supports", None)
+            if callable(supports) and not supports("animation"):
+                return False
+            if self._animation_id == animation_id:
+                return True
+            try:
+                await asyncio.to_thread(robot.animation.play, animation_id)
+            except Exception as error:
+                logger.warning(
+                    "Robot animation %s could not be started: %s",
+                    animation_id,
+                    error,
+                )
+                return False
+            self._animation_id = animation_id
+            return True
 
     def _require_robot(self) -> Any:
         if self._robot is None:
@@ -209,8 +240,10 @@ class WatcheRobotAdapter:
         )
         if self.last_playback_started_at is None:
             self.last_playback_started_at = time.monotonic()
+        audio_duration_seconds = len(block) / (24_000 * 1 * 2)
+        playback_timeout = max(10.0, audio_duration_seconds + 5.0)
         try:
-            await asyncio.to_thread(playback.wait, 10.0)
+            await asyncio.to_thread(playback.wait, playback_timeout)
         except Exception:
             try:
                 await asyncio.to_thread(robot.audio.stop)

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from .intent import FocusIntent, match_focus_intent, normalize_zh_text
 from .models import FocusSessionCreate, SessionState
 from .ports import AsrPort, LlmPort, RobotPort, TtsPort
+from .presentation import RobotPresentationState
 from .service import FocusService
 
 
@@ -84,6 +85,7 @@ class VoiceController:
             # The firmware pauses microphone upload while speaker playback is active.
             # Treat every utterance as a separate microphone lease: close it before
             # ASR/TTS, then reopen it for the next turn after playback completes.
+            await self._show_voice_state(RobotPresentationState.LISTENING)
             chunks = self.robot.microphone_chunks()
             utterances = self.vad.utterances(chunks)
             try:
@@ -97,6 +99,7 @@ class VoiceController:
                 break
             await self.service.set_voice_busy(True)
             try:
+                await self._show_voice_state(RobotPresentationState.THINKING)
                 speech_ended_at = time.monotonic()
                 try:
                     transcript = await self.asr.transcribe(utterance)
@@ -117,6 +120,7 @@ class VoiceController:
     async def handle_transcript(self, transcript: str) -> str:
         await self.service.set_voice_busy(True)
         try:
+            await self._show_voice_state(RobotPresentationState.THINKING)
             return await self._handle_transcript_while_busy(
                 transcript, speech_ended_at=time.monotonic()
             )
@@ -204,6 +208,7 @@ class VoiceController:
 
         speech_to_first_audio_ms = None
         if self.tts is not None:
+            await self._show_voice_state(RobotPresentationState.SPEAKING)
             try:
                 await self.robot.play_pcm(self.tts.synthesize(reply))
             except Exception as error:
@@ -224,6 +229,11 @@ class VoiceController:
                 },
             )
         return reply
+
+    async def _show_voice_state(self, state: RobotPresentationState) -> None:
+        show = getattr(self.service, "show_voice_state", None)
+        if show is not None:
+            await show(state)
 
     @staticmethod
     def _failure_reason(error: Exception) -> str:

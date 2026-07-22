@@ -19,6 +19,7 @@ from .models import (
     SessionState,
 )
 from .ports import AsrPort, LlmPort, RobotPort, TtsPort, VisionPort
+from .presentation import ANIMATION_ID_BY_STATE, RobotPresentationState
 from .scheduler import BatchBuilder, VisionPriorityScheduler
 
 
@@ -64,6 +65,7 @@ class FocusService:
         self._aggregators: dict[str, FocusAggregator] = {}
         self._capture_task: asyncio.Task[None] | None = None
         self._timer_task: asyncio.Task[None] | None = None
+        self._voice_busy = False
         self._scheduler: VisionPriorityScheduler | None = None
         if vision is not None:
             self._scheduler = VisionPriorityScheduler(
@@ -91,6 +93,8 @@ class FocusService:
                 # The runtime connection supervisor keeps retrying while HTTP and
                 # local model health endpoints remain available.
                 pass
+            else:
+                await self._show_presentation(RobotPresentationState.IDLE)
 
     async def close(self) -> None:
         await self._cancel_background_tasks()
@@ -144,7 +148,9 @@ class FocusService:
                     self._emit(
                         session, "session.state_changed", {"state": session.state.value}
                     )
+                    await self._show_presentation(RobotPresentationState.ERROR)
                     return session, False
+                await self._show_presentation(RobotPresentationState.FOCUSING)
                 self._capture_task = asyncio.create_task(
                     self._capture_loop(session.session_id),
                     name=f"capture-{session.session_id}",
@@ -163,6 +169,7 @@ class FocusService:
             session.state = SessionState.FINALIZING
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self._show_presentation(RobotPresentationState.ANALYZING)
             await self._stop_sampling()
             tail = self.batch_builder.flush_tail()
             if self._scheduler is not None:
@@ -179,6 +186,7 @@ class FocusService:
             self.store.save_report(report)
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self._show_presentation(RobotPresentationState.COMPLETED)
             self.store.cleanup_expired()
             return session
 
@@ -195,6 +203,7 @@ class FocusService:
             session.ended_at = datetime.now(UTC)
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self._show_presentation(RobotPresentationState.IDLE)
             return session
 
     def get_session(self, session_id: str) -> FocusSession:
@@ -206,8 +215,14 @@ class FocusService:
         return self.store.load_report(session_id)
 
     async def set_voice_busy(self, busy: bool) -> None:
+        self._voice_busy = busy
         if self._scheduler is not None:
             await self._scheduler.set_voice_busy(busy)
+        if not busy:
+            await self._restore_presentation()
+
+    async def show_voice_state(self, state: RobotPresentationState) -> bool:
+        return await self._show_presentation(state, voice_override=True)
 
     async def health(self) -> HealthResponse:
         components: dict[str, ComponentHealth] = {}
@@ -285,6 +300,7 @@ class FocusService:
                     self._emit(
                         session, "session.state_changed", {"state": session.state.value}
                     )
+                    await self._show_presentation(RobotPresentationState.ERROR)
                     break
             else:
                 session.captured_frames += 1
@@ -329,6 +345,9 @@ class FocusService:
             "voice.turn_started",
             {"source": "session_timer", "intent": "auto_summary"},
         )
+        await self._show_presentation(
+            RobotPresentationState.SPEAKING, voice_override=True
+        )
         try:
             await self.robot.play_pcm(self.tts.synthesize(reply))
         except Exception as error:
@@ -351,6 +370,7 @@ class FocusService:
                 "speech_to_first_audio_ms": first_audio_ms,
             },
         )
+        await self._show_presentation(RobotPresentationState.COMPLETED)
 
     async def _stop_sampling(self) -> None:
         current = asyncio.current_task()
@@ -391,6 +411,7 @@ class FocusService:
                 },
             )
             self._emit(session, "stats.updated", session.stats.model_dump(mode="json"))
+            await self._show_presentation(RobotPresentationState.FOCUSING)
         else:
             session.failed_frames += len(analysis.observations) or 1
             reason = analysis.error or "analysis_failed"
@@ -409,10 +430,12 @@ class FocusService:
                 "service.degraded",
                 {"component": "stepfun_vlm", "reason": reason[:200]},
             )
+            await self._show_presentation(RobotPresentationState.ERROR)
         self.store.save_session(session)
 
     async def _analysis_started(self, frames: list) -> None:
         if self._active is not None:
+            await self._show_presentation(RobotPresentationState.ANALYZING)
             self._emit(
                 self._active,
                 "vision.batch_started",
@@ -421,6 +444,7 @@ class FocusService:
 
     async def _analysis_paused(self, frames: list) -> None:
         if self._active is not None:
+            await self._show_presentation(RobotPresentationState.FOCUSING)
             self._emit(
                 self._active,
                 "vision.batch_paused",
@@ -439,6 +463,35 @@ class FocusService:
                     "frame_ids": [frame.frame_id for frame in frames],
                 },
             )
+
+    async def _show_presentation(
+        self,
+        state: RobotPresentationState,
+        *,
+        voice_override: bool = False,
+    ) -> bool:
+        """Best-effort display update; animation failures never stop the Demo."""
+        if self.robot is None or self._voice_busy and not voice_override:
+            return False
+        play = getattr(self.robot, "play_animation", None)
+        if play is None:
+            return False
+        try:
+            return bool(await play(ANIMATION_ID_BY_STATE[state]))
+        except Exception:
+            return False
+
+    async def _restore_presentation(self) -> bool:
+        session = self._active
+        if session is None or session.state is SessionState.CANCELLED:
+            state = RobotPresentationState.IDLE
+        elif session.state in {SessionState.RUNNING, SessionState.FINALIZING}:
+            state = RobotPresentationState.FOCUSING
+        elif session.state is SessionState.COMPLETED:
+            state = RobotPresentationState.COMPLETED
+        else:
+            state = RobotPresentationState.ERROR
+        return await self._show_presentation(state)
 
     def _build_report(self, session: FocusSession) -> FocusReport:
         stats = session.stats

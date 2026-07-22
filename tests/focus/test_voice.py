@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from focus.models import FocusMode, FocusSession, FocusStats, SessionState
+from focus.presentation import RobotPresentationState
 from focus.voice import VoiceController
 
 
@@ -12,6 +13,7 @@ class FakeFocusService:
         self.busy: list[bool] = []
         self.events: list[tuple[str, dict]] = []
         self.degraded: list[tuple[str, str]] = []
+        self.presentations: list[RobotPresentationState] = []
         self.session = FocusSession(
             session_id="fs_test",
             mode=FocusMode.DEMO,
@@ -22,6 +24,10 @@ class FakeFocusService:
 
     async def set_voice_busy(self, busy):
         self.busy.append(busy)
+
+    async def show_voice_state(self, state):
+        self.presentations.append(state)
+        return True
 
     async def create_session(self, request):
         return self.session, False
@@ -171,6 +177,14 @@ async def test_deterministic_start_status_stop_and_voice_priority() -> None:
         "好的，已开始专注统计，我会在结束时告诉你结果。",
         "目前已采集 0 帧，分析 4 帧。",
         "统计完成：在位率 90% ，手机可见率 10% ，专注趋势 88 分。",
+    ]
+    assert service.presentations == [
+        RobotPresentationState.THINKING,
+        RobotPresentationState.SPEAKING,
+        RobotPresentationState.THINKING,
+        RobotPresentationState.SPEAKING,
+        RobotPresentationState.THINKING,
+        RobotPresentationState.SPEAKING,
     ]
 
 

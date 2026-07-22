@@ -10,10 +10,12 @@ from focus.infrastructure.watcher_sdk import WatcheRobotAdapter
 class FakePlayback:
     def __init__(self, *, fail: bool = False) -> None:
         self.waited = False
+        self.wait_timeout = None
         self.fail = fail
 
     def wait(self, timeout=None):
         self.waited = True
+        self.wait_timeout = timeout
         if self.fail:
             raise TimeoutError("playback timeout")
         return self
@@ -38,15 +40,19 @@ class FakeRobot:
     def __init__(self) -> None:
         self.capture_calls = 0
         self.audio_chunks: list[bytes] = []
+        self.playbacks: list[FakePlayback] = []
         self.audio_stop_calls = 0
         self.fail_playback = False
         self.microphone_open_calls = 0
         self.microphone_close_calls = 0
+        self.animation_ids: list[str] = []
+        self.animation_supported = True
         self.closed = False
         self._closed = False
         self.camera = self.Camera(self)
         self.audio = self.Audio(self)
         self.microphone = self.Microphone(self)
+        self.animation = self.Animation(self)
 
     class Camera:
         def __init__(self, parent) -> None:
@@ -66,7 +72,9 @@ class FakeRobot:
 
         def play_pcm(self, data, **kwargs):
             self.parent.audio_chunks.append(data)
-            return FakePlayback(fail=self.parent.fail_playback)
+            playback = FakePlayback(fail=self.parent.fail_playback)
+            self.parent.playbacks.append(playback)
+            return playback
 
         def stop(self):
             self.parent.audio_stop_calls += 1
@@ -79,6 +87,17 @@ class FakeRobot:
         def open(self):
             self.parent.microphone_open_calls += 1
             return FakeMicrophone(self.parent)
+
+    class Animation:
+        def __init__(self, parent) -> None:
+            self.parent = parent
+
+        def play(self, animation_id):
+            self.parent.animation_ids.append(animation_id)
+            return object()
+
+    def supports(self, capability):
+        return capability != "animation" or self.animation_supported
 
     def close(self):
         self.closed = True
@@ -116,8 +135,26 @@ async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic
     assert destination.read_bytes() == b"jpeg-data"
     assert not destination.with_suffix(".jpg.tmp").exists()
     assert frame.path == destination
-    assert robot.audio_chunks == [b"\x00\x00" * 10, b"\x01\x00" * 10]
+    assert robot.audio_chunks == [b"\x00\x00" * 10 + b"\x01\x00" * 10]
     assert adapter.last_playback_started_at is not None
+
+
+@pytest.mark.asyncio
+async def test_continuous_playback_timeout_includes_audio_duration() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    async def chunks():
+        yield b"\x00\x00" * (24_000 * 12)
+
+    await adapter.play_pcm(chunks())
+
+    assert len(robot.audio_chunks) == 1
+    assert robot.playbacks[0].wait_timeout == 17.0
+    await adapter.close()
 
 
 @pytest.mark.asyncio
@@ -194,4 +231,23 @@ async def test_external_playback_pauses_and_resumes_active_microphone() -> None:
     with pytest.raises(asyncio.CancelledError):
         await reader
     assert robot.microphone_close_calls == 2
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_animation_play_is_capability_checked_and_deduplicated() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    assert await adapter.play_animation("listening") is True
+    assert await adapter.play_animation("listening") is True
+    assert await adapter.play_animation("speaking") is True
+    assert robot.animation_ids == ["listening", "speaking"]
+
+    robot.animation_supported = False
+    assert await adapter.play_animation("happy") is False
+    assert robot.animation_ids == ["listening", "speaking"]
     await adapter.close()
