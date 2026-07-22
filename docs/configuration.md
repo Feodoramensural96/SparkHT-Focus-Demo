@@ -15,12 +15,12 @@ SparkHT Focus 使用 `pydantic-settings` 读取当前目录下的 `.env` 和进�
 
 | 变量 | 默认值 | 说明 |
 |---|---:|---|
-| `WATCHER_PAIRING_CODE` | 空 | 当次临时六位配对码；属于秘密，不得提交或记录 |
+| `WATCHER_PAIRING_CODE` | 空 | 可选的启动时临时六位码；通常改用 Web 内存配对，不得提交或记录 |
 | `WATCHER_SDK_HOST` | `auto` | 自动双向发现；复杂路由下可设机器人可达地址 |
 | `WATCHER_SDK_DISCOVERY_PORT` | `37021` | SDK UDP 发现端口 |
 | `WATCHER_SDK_WEBSOCKET_PORT` | `8766` | SDK WebSocket 端口 |
 
-启用机器人但配对码为空时，网关仍可启动，但不会创建机器人连接。推荐在进程启动时通过环境变量临时注入配对码，而不是保存到 `.env`。
+启用机器人但配对码为空时，网关仍可启动。推荐启动后在 Web 技术状态卡片输入六位码：后端在内存中建立 SDK 并热挂载语音控制器，不写 `.env`、日志或会话文件。无浏览器部署才需要在进程启动时通过环境变量临时注入。
 
 ## 会话与调度
 

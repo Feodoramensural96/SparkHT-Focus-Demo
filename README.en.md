@@ -16,6 +16,7 @@ The project runs independently of `WatcheRobot_server`. A single connection to t
 - Preempt or cancel slow vision work when speech is detected.
 - Show native 4:3 images, the latest four upstream/downstream messages, core metrics, health, and events in one ultrawide dashboard, with a responsive narrow-screen fallback.
 - Play a focus animation and a head-up/nod/neutral gesture when a session starts, then keep the focus expression looping.
+- Pair the robot at runtime from the Web status card without restarting the gateway or persisting the six-digit code.
 - Store sessions, events, frames, and reports locally on the Spark.
 
 ## Architecture

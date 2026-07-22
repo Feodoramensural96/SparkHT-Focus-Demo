@@ -85,6 +85,8 @@ def test_dashboard_uses_ultrawide_regions_and_real_model_name(tmp_path) -> None:
         "机器人下行 · SparkHT → 扬声器",
         "带鱼屏横向全景监控",
         "最近 4 条",
+        "机器人 SDK 配对",
+        "仅在当前进程内存中使用",
     ):
         assert text in response.text
     assert "fetch('/api/focus/active')" in response.text
@@ -97,6 +99,9 @@ def test_dashboard_uses_ultrawide_regions_and_real_model_name(tmp_path) -> None:
     assert "MAX_DIALOGUES=4" in response.text
     assert "items.slice(0,-MAX_DIALOGUES).forEach" in response.text
     assert "conversation.scrollTo" in response.text
+    assert 'type="password"' in response.text
+    assert "fetch('/api/robot/pair'" in response.text
+    assert "'X-Focus-Local-Action':'pair'" in response.text
     for element_id in (
         "frame",
         "presence",
@@ -109,6 +114,73 @@ def test_dashboard_uses_ultrawide_regions_and_real_model_name(tmp_path) -> None:
         "health",
     ):
         assert f'id="{element_id}"' in response.text
+
+
+def test_web_pairing_validates_and_never_echoes_codes(tmp_path) -> None:
+    service = FocusService(store=FileSessionStore(tmp_path), robot=None, vision=None)
+    received: list[str] = []
+
+    async def pair_robot(code: str) -> dict[str, str]:
+        received.append(code)
+        return {"status": "connected", "message": "机器人 SDK 配对成功。"}
+
+    client = TestClient(create_app(service, pair_robot=pair_robot))
+    headers = {"X-Focus-Local-Action": "pair"}
+
+    missing_confirmation = client.post(
+        "/api/robot/pair", json={"pairing_code": "123456"}
+    )
+    assert missing_confirmation.status_code == 403
+
+    invalid = client.post(
+        "/api/robot/pair",
+        json={"pairing_code": "secret-value"},
+        headers=headers,
+    )
+    assert invalid.status_code == 422
+    assert "secret-value" not in invalid.text
+
+    paired = client.post(
+        "/api/robot/pair", json={"pairing_code": "123456"}, headers=headers
+    )
+    assert paired.status_code == 200
+    assert paired.json()["status"] == "connected"
+    assert paired.headers["cache-control"] == "no-store"
+    assert "123456" not in paired.text
+    assert received == ["123456"]
+
+
+def test_web_pairing_rejects_cross_origin_and_redacts_failures(tmp_path) -> None:
+    service = FocusService(store=FileSessionStore(tmp_path), robot=None, vision=None)
+
+    async def broken_pairing(code: str) -> dict[str, str]:
+        raise RuntimeError(f"SDK rejected {code}")
+
+    client = TestClient(create_app(service, pair_robot=broken_pairing))
+    payload = {"pairing_code": "123456"}
+    headers = {"X-Focus-Local-Action": "pair"}
+
+    cross_origin = client.post(
+        "/api/robot/pair",
+        json=payload,
+        headers={**headers, "Origin": "https://example.invalid"},
+    )
+    assert cross_origin.status_code == 403
+
+    failed = client.post("/api/robot/pair", json=payload, headers=headers)
+    assert failed.status_code == 502
+    assert "123456" not in failed.text
+    assert "SDK rejected" not in failed.text
+
+
+def test_web_pairing_endpoint_is_disabled_without_runtime_callback(tmp_path) -> None:
+    client, _ = make_client(tmp_path)
+    response = client.post(
+        "/api/robot/pair",
+        json={"pairing_code": "123456"},
+        headers={"X-Focus-Local-Action": "pair"},
+    )
+    assert response.status_code == 503
 
 
 def test_event_history_reads_persisted_events(tmp_path) -> None:

@@ -21,6 +21,7 @@ class FocusRuntime:
     def __init__(self, settings: FocusSettings) -> None:
         self.settings = settings
         self.http = httpx.AsyncClient(limits=httpx.Limits(max_connections=8))
+        self._pair_lock = asyncio.Lock()
         pairing_code = settings.watcher_pairing_code.get_secret_value()
         self.robot = None
         if settings.focus_enable_robot and pairing_code:
@@ -66,31 +67,33 @@ class FocusRuntime:
         )
         self.voice = None
         if self.robot is not None:
-            self.voice = VoiceController(
-                service=self.service,
-                robot=self.robot,
-                asr=self.asr,
-                llm=self.llm,
-                tts=self.tts,
-                vad=EnergyVad(threshold=settings.focus_vad_idle_threshold),
-                focus_vad_threshold=settings.focus_vad_threshold,
-            )
-        self.app = create_app(self.service)
+            self.voice = self._build_voice_controller(self.robot)
+        self.app = create_app(
+            self.service,
+            pair_robot=self.pair_robot if settings.focus_enable_robot else None,
+        )
         self._voice_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         await asyncio.gather(self.service.start(), self._prewarm_fast_chain())
         if self.voice is not None:
-            self._voice_task = asyncio.create_task(
-                self._run_voice_supervisor(), name="focus-voice-supervisor"
-            )
+            self._start_voice_supervisor()
 
-    async def _run_voice_supervisor(self) -> None:
-        assert self.robot is not None and self.voice is not None
+    def _start_voice_supervisor(self) -> None:
+        if self.robot is None or self.voice is None:
+            return
+        self._voice_task = asyncio.create_task(
+            self._run_voice_supervisor(self.robot, self.voice),
+            name="focus-voice-supervisor",
+        )
+
+    async def _run_voice_supervisor(
+        self, robot: WatcheRobotAdapter, voice: VoiceController
+    ) -> None:
         while True:
-            if not self.robot.connected:
+            if not robot.connected:
                 try:
-                    await self.robot.connect()
+                    await robot.connect()
                     await self.service.refresh_light()
                 except asyncio.CancelledError:
                     raise
@@ -98,13 +101,70 @@ class FocusRuntime:
                     await asyncio.sleep(2.0)
                     continue
             try:
-                await self.voice.run()
+                await voice.run()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 pass
-            await self.robot.close()
+            await robot.close()
             await asyncio.sleep(2.0)
+
+    async def _stop_voice_supervisor(self) -> None:
+        if self.voice is not None:
+            await self.voice.stop()
+        task, self._voice_task = self._voice_task, None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    def _build_voice_controller(self, robot: WatcheRobotAdapter) -> VoiceController:
+        return VoiceController(
+            service=self.service,
+            robot=robot,
+            asr=self.asr,
+            llm=self.llm,
+            tts=self.tts,
+            vad=EnergyVad(threshold=self.settings.focus_vad_idle_threshold),
+            focus_vad_threshold=self.settings.focus_vad_threshold,
+        )
+
+    async def pair_robot(self, pairing_code: str) -> dict[str, str]:
+        """Pair and hot-attach the robot; the code remains process-memory only."""
+        async with self._pair_lock:
+            if self.robot is not None and self.robot.connected:
+                return {
+                    "status": "already_connected",
+                    "message": "机器人 SDK 已连接，无需重复配对。",
+                }
+
+            old_robot = self.robot
+            await self._stop_voice_supervisor()
+            self.voice = None
+            self.robot = None
+            if old_robot is not None:
+                self.service.detach_robot(old_robot)
+                await old_robot.close()
+
+            candidate = WatcheRobotAdapter(
+                pairing_code=pairing_code,
+                discovery_port=self.settings.watcher_sdk_discovery_port,
+                websocket_port=self.settings.watcher_sdk_websocket_port,
+                host=self.settings.watcher_sdk_host,
+            )
+            try:
+                await candidate.connect()
+            except Exception:
+                await candidate.close()
+                raise
+
+            self.robot = candidate
+            self.voice = self._build_voice_controller(candidate)
+            await self.service.attach_robot(candidate)
+            self._start_voice_supervisor()
+            return {"status": "connected", "message": "机器人 SDK 配对成功。"}
 
     async def _prewarm_fast_chain(self) -> None:
         async def warm_asr() -> None:
@@ -123,14 +183,7 @@ class FocusRuntime:
         await asyncio.gather(warm_asr(), warm_llm(), warm_tts(), return_exceptions=True)
 
     async def close(self) -> None:
-        if self.voice is not None:
-            await self.voice.stop()
-        if self._voice_task is not None:
-            self._voice_task.cancel()
-            try:
-                await self._voice_task
-            except asyncio.CancelledError:
-                pass
+        await self._stop_voice_supervisor()
         await self.service.close()
         await self.http.aclose()
 

@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, HTTPException, Response
+import json
+import re
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from .models import FocusSessionCreate, SessionState
 from .service import FocusService
 
 
-def create_app(service: FocusService) -> FastAPI:
+PairRobot = Callable[[str], Awaitable[dict[str, str]]]
+
+
+def create_app(
+    service: FocusService, *, pair_robot: PairRobot | None = None
+) -> FastAPI:
     app = FastAPI(title="SparkHT Focus Orchestrator", version="0.1.0")
     app.state.focus_service = service
 
@@ -115,6 +124,43 @@ def create_app(service: FocusService) -> FastAPI:
     async def health() -> dict:
         return (await service.health()).model_dump(mode="json")
 
+    @app.post("/api/robot/pair")
+    async def pair_robot_from_web(
+        request: Request,
+        response: Response,
+        local_action: str | None = Header(default=None, alias="X-Focus-Local-Action"),
+    ) -> dict[str, str]:
+        if pair_robot is None:
+            raise HTTPException(status_code=503, detail="机器人配对功能未启用。")
+        if local_action != "pair":
+            raise HTTPException(status_code=403, detail="缺少本地配对确认。")
+        origin = request.headers.get("origin")
+        expected_origin = str(request.base_url).rstrip("/")
+        if origin is not None and origin.rstrip("/") != expected_origin:
+            raise HTTPException(status_code=403, detail="拒绝跨来源配对请求。")
+        body = await request.body()
+        if len(body) > 128:
+            raise HTTPException(status_code=413, detail="配对请求过大。")
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status_code=400, detail="配对请求格式无效。") from None
+        code = payload.get("pairing_code") if isinstance(payload, dict) else None
+        if not isinstance(code, str) or re.fullmatch(r"\d{6}", code) is None:
+            raise HTTPException(status_code=422, detail="配对码必须是六位数字。")
+        try:
+            result = await pair_robot(code)
+        except TimeoutError:
+            raise HTTPException(
+                status_code=504, detail="配对超时，请确认机器人配对页面仍然打开。"
+            ) from None
+        except Exception:
+            raise HTTPException(
+                status_code=502, detail="配对失败，请刷新机器人配对码后重试。"
+            ) from None
+        response.headers["Cache-Control"] = "no-store"
+        return result
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
         return _DASHBOARD_HTML
@@ -138,6 +184,7 @@ _DASHBOARD_HTML = """<!doctype html>
 .conversation{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:4px}.dialogue{flex:0 0 auto;border:1px solid;padding:9px 10px;border-radius:9px}.dialogue--up{border-color:#1f7c74;background:#0c2b2d}.dialogue--down{border-color:#5b45a0;background:#211b3b}.dialogue__head{display:flex;flex-direction:column;gap:2px;margin-bottom:4px;font-size:10px}.dialogue--up .dialogue__head{color:#68eadb}.dialogue--down .dialogue__head{color:#c4b5fd}.dialogue__text{font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}.dialogue__meta{margin-top:5px;color:#9caec8;font-size:10px}.empty-state{padding:15px 10px;border:1px dashed #304563;border-radius:9px;color:var(--muted);font-size:12px;text-align:center}
 .frame-card .section-head{margin-bottom:6px}.frame-wrap{width:min(100%,640px);margin:auto}.frame{position:relative;width:640px;max-width:100%;aspect-ratio:4/3;background:#03070d;border:0;box-shadow:0 0 0 1px #2a3d58,0 18px 50px #0006;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center}.frame img{display:block;width:640px;max-width:100%;height:auto;aspect-ratio:4/3;object-fit:contain}.frame span{position:absolute;color:#758aa8;font-size:13px}.frame-link{display:block;color:inherit;text-decoration:none}.frame-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}.frame-caption{display:flex;flex-direction:row;justify-content:space-between;gap:8px;margin-top:7px}.frame-caption .meta:last-child{text-align:right}
 .status{display:flex;align-items:flex-start;gap:7px;margin:0}.dot{flex:0 0 auto;width:8px;height:8px;margin-top:5px;border-radius:50%;background:#eab308}.status-copy{font-size:11px;color:#b8c8df;overflow-wrap:anywhere}.facts{min-height:0;display:flex;flex-direction:column;gap:5px;margin-top:8px;overflow-y:auto}.fact{padding:7px 9px;border-radius:7px;background:#081321;color:#aebed5;font-size:11px}
+.pairing{flex:0 0 auto;margin-top:9px;padding-top:9px;border-top:1px solid #1d3048}.pairing__label{display:block;margin-bottom:5px;color:#c8d7ea;font-size:11px}.pairing__row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}.pairing__input{min-width:0;height:34px;border:1px solid #35506f;border-radius:7px;background:#07111f;color:#edf4ff;padding:0 9px;font:15px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.16em}.pairing__input:focus{outline:2px solid #3b82f6;outline-offset:1px}.pairing__button{height:34px;border:1px solid #3478bd;border-radius:7px;background:#153f69;color:#dbeeff;padding:0 11px;font-weight:700;cursor:pointer}.pairing__button:hover{background:#1b5288}.pairing__button:disabled{cursor:wait;opacity:.55}.pairing__status{min-height:16px;margin:5px 0 0;color:#8299b8;font-size:10px;overflow-wrap:anywhere}.pairing__status[data-state="success"]{color:#5ee0b5}.pairing__status[data-state="error"]{color:#fb8da0}
 .timeline{flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:3px}.event{display:grid;grid-template-columns:64px minmax(0,1fr);column-gap:8px;padding:6px 2px;border-bottom:1px solid #1b2a3f}.event:last-child{border-bottom:0}.event__time{grid-row:1/3;color:#6f87a8;font:10px ui-monospace,SFMono-Regular,Consolas,monospace}.event__title{font-size:11px;color:#dce8f8}.event__detail{font-size:10px;color:#8fa5c4;overflow-wrap:anywhere}.event--danger .event__title{color:var(--danger)}
 .privacy{grid-area:privacy;min-width:0;font-size:10px;color:#7086a4;padding:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(min-width:1751px) and (min-height:800px){body{overflow:hidden}.shell{height:100dvh}}
@@ -186,6 +233,11 @@ _DASHBOARD_HTML = """<!doctype html>
     <div class="section-head"><h2 id="statusTitle">技术状态</h2></div>
     <p class="status"><span id="healthDot" class="dot"></span><span id="health" class="status-copy">正在检查本地服务</span></p>
     <div class="facts"><div id="counts" class="fact">抓拍 — · 已分析 — · 失败 — · 丢弃 —</div><div id="latency" class="fact">最近 Step3 批次：—</div><div class="fact">视觉单并发 · 语音活动时暂停或取消慢任务</div></div>
+    <form id="pairingForm" class="pairing" autocomplete="off">
+      <label class="pairing__label" for="pairingCode">机器人 SDK 配对</label>
+      <div class="pairing__row"><input id="pairingCode" class="pairing__input" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="六位配对码" aria-describedby="pairingStatus" required><button id="pairingButton" class="pairing__button" type="submit">连接</button></div>
+      <p id="pairingStatus" class="pairing__status">仅在当前进程内存中使用，不写入配置或日志。</p>
+    </form>
   </section>
 
   <section class="card timeline-card" aria-labelledby="timelineTitle">
@@ -207,6 +259,7 @@ function renderStats(d){ui.presence.textContent=pct(d.presence_ratio);ui.phone.t
 function renderSession(s){renderStats(s.stats);document.querySelector('#sessionState').textContent=`${STATE_LABELS[s.state]||s.state} · ${s.session_id}`;document.querySelector('#counts').textContent=`抓拍 ${s.captured_frames} · 已分析 ${s.stats.analyzed_frames} · 失败 ${s.failed_frames} · 丢弃 ${s.dropped_batches}`}
 function setFrame(frameId,latency){const url=`/api/focus/sessions/${encodeURIComponent(sid)}/frames/latest?t=${Date.now()}`;ui.frame.src=url;ui.frameLink.href=url;document.querySelector('#empty').hidden=true;ui.frame.onload=()=>{const size=`${ui.frame.naturalWidth}×${ui.frame.naturalHeight}`;document.querySelector('#frameMeta').textContent=`原始分辨率 ${size}${frameId?` · ${frameId}`:''}${latency!=null?` · 抓拍 ${latency} ms`:''}`}}
 async function health(){try{const r=await fetch('/health'),x=await r.json(),parts=Object.entries(x.components).map(([n,v])=>`${n} ${v.status}`);document.querySelector('#health').textContent=parts.join(' · ');document.querySelector('#healthDot').style.background=x.status==='healthy'?'#22c55e':x.status==='degraded'?'#eab308':'#ef4444'}catch{document.querySelector('#health').textContent='健康检查失败';document.querySelector('#healthDot').style.background='#ef4444'}}
+async function pairRobot(event){event.preventDefault();const input=document.querySelector('#pairingCode'),button=document.querySelector('#pairingButton'),status=document.querySelector('#pairingStatus'),code=input.value.trim();input.value='';if(!/^\\d{6}$/.test(code)){status.dataset.state='error';status.textContent='请输入六位数字配对码。';input.focus();return}button.disabled=true;status.dataset.state='';status.textContent='正在发现并连接机器人，最长约 30 秒…';try{const r=await fetch('/api/robot/pair',{method:'POST',headers:{'Content-Type':'application/json','X-Focus-Local-Action':'pair'},body:JSON.stringify({pairing_code:code})}),x=await r.json();if(!r.ok)throw new Error(x.detail||'配对失败，请重试。');status.dataset.state='success';status.textContent=x.message||'机器人 SDK 配对成功。';await health()}catch(error){status.dataset.state='error';status.textContent=error instanceof Error?error.message:'配对失败，请重试。';input.focus()}finally{button.disabled=false}}
 function clock(value){try{return new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value))}catch{return value}}
 function addDialogue(x){let direction,text,label,meta='';if(x.type==='voice.turn_started'&&x.data.transcript){direction='up';text=x.data.transcript;label='机器人上行 · 麦克风 → SparkHT';meta='语音识别完成'}else if(x.type==='voice.turn_completed'){direction='down';text=x.data.reply||(x.data.source==='session_timer'?reportSummary:'机器人已响应（旧事件未保存回复文本）');label='机器人下行 · SparkHT → 扬声器';const intent=INTENT_LABELS[x.data.intent]||x.data.intent;const latency=x.data.speech_to_first_audio_ms;meta=[intent,latency==null?'':`首音 ${latency} ms`].filter(Boolean).join(' · ')}else{return}document.querySelector('#conversationEmpty')?.remove();const conversation=document.querySelector('#conversation'),item=document.createElement('article');item.className=`dialogue dialogue--${direction}`;const head=document.createElement('div');head.className='dialogue__head';head.textContent=`${label} · ${clock(x.occurred_at)}`;const body=document.createElement('div');body.className='dialogue__text';body.textContent=text||'下行播放完成';item.append(head,body);if(meta){const extra=document.createElement('div');extra.className='dialogue__meta';extra.textContent=meta;item.append(extra)}conversation.append(item);const items=[...conversation.querySelectorAll('.dialogue')];items.slice(0,-MAX_DIALOGUES).forEach(old=>old.remove());requestAnimationFrame(()=>conversation.scrollTo({top:conversation.scrollHeight,behavior:'smooth'}))}
 function eventCopy(x){const d=x.data;switch(x.type){case'session.state_changed':return['会话状态',STATE_LABELS[d.state]||d.state];case'camera.frame_captured':return['抓拍完成',`${d.frame_id} · ${d.latency_ms} ms`];case'camera.capture_failed':return['抓拍失败',d.error||'未知错误'];case'vision.batch_started':return['Step3 开始',`${(d.frame_ids||[]).length} 帧`];case'vision.batch_paused':return['Step3 因语音暂停',`${(d.frame_ids||[]).join('、')}`];case'vision.batch_completed':return['Step3 完成',`${d.latency_ms} ms · ${(d.observations||[]).length} 个观察`];case'vision.batch_failed':return['Step3 失败',d.error||'分析失败'];case'stats.updated':return['核心指标已更新',`已分析 ${d.analyzed_frames} 帧`];case'service.degraded':return['服务降级',`${d.component||''} ${d.reason||''}`.trim()];default:return[x.type,'']}}
@@ -217,7 +270,7 @@ async function hydrate(){await hydrateSession();try{const r=await fetch(`/api/fo
 async function connect(){await hydrate();eventSource=new EventSource(`/api/focus/sessions/${encodeURIComponent(sid)}/events`);EVENT_TYPES.forEach(type=>eventSource.addEventListener(type,event=>renderEvent(JSON.parse(event.data))))}
 function resetView(){seenEvents=new Set();reportSummary='';document.querySelector('#conversation').innerHTML='<div id="conversationEmpty" class="empty-state">等待机器人上行或下行对话</div>';document.querySelector('#timeline').innerHTML='<div class="empty-state">等待会话事件</div>'}
 async function watchActive(){try{let r=await fetch('/api/focus/active');if(!r.ok){if(sid)return;r=await fetch('/api/focus/recent');if(!r.ok)return}const s=await r.json();if(s.session_id===sid)return;if(eventSource)eventSource.close();sid=s.session_id;history.replaceState(null,'',`/?session=${encodeURIComponent(sid)}`);resetView();connect()}catch{}}
-health();setInterval(health,10000);if(sid)connect();watchActive();setInterval(watchActive,3000);
+document.querySelector('#pairingForm').addEventListener('submit',pairRobot);health();setInterval(health,10000);if(sid)connect();watchActive();setInterval(watchActive,3000);
 </script>
 </body>
 </html>"""

@@ -88,6 +88,17 @@ class FocusService:
     def active_session(self) -> FocusSession | None:
         return self._active
 
+    async def attach_robot(self, robot: RobotPort) -> None:
+        """Attach an already-connected SDK adapter without restarting the service."""
+        self.robot = robot
+        await self._restore_default_presentation()
+        await self.refresh_light()
+
+    def detach_robot(self, robot: RobotPort) -> None:
+        """Detach only the adapter currently owned by the service."""
+        if self.robot is robot:
+            self.robot = None
+
     async def start(self) -> None:
         self.store.cleanup_expired()
         self.store.mark_unfinished_interrupted()

@@ -16,6 +16,7 @@
 - 语音优先：检测到有效语音后暂停或取消慢视觉请求，空闲后只恢复最新批次。
 - 带鱼屏横向仪表盘在一屏展示原始 4:3 图片、最近四条上下行对话、核心指标、健康状态和事件时间线，并为窄屏提供响应式回退。
 - 开始专注时播放专注表情并执行“抬头 → 点头 → 回中立”，随后保持循环专注表情。
+- 可在 Web 技术状态卡片输入临时六位码，无需重启网关即可热配对机器人。
 - 会话、事件、抓拍和报告只保存在 Spark 本地。
 
 ## 架构
@@ -86,7 +87,9 @@ scripts/start_step3_vllm.sh
 
 ### 3. 连接机器人
 
-打开机器人上的 `sdk.control.app`，通过无回显终端读取临时六位配对码。不要把真实配对码写入 `.env`、命令历史、日志或文档。
+打开机器人上的 `sdk.control.app`，再打开仪表盘，在“技术状态 → 机器人 SDK 配对”中输入临时六位码。配对码只在当前进程内存使用，输入框提交后立即清空，无需重启网关。
+
+无浏览器部署也可以通过无回显终端在首次启动时注入。不要把真实配对码写入 `.env`、命令历史、日志或文档。
 
 ```bash
 read -r -s -p 'Pairing code: ' watcher_pairing_code
@@ -129,6 +132,7 @@ curl -X POST http://127.0.0.1:8780/api/focus/sessions \
 | `GET` | `/api/focus/sessions/{id}/report` | 最终报告 |
 | `GET` | `/api/focus/sessions/{id}/events` | SSE 事件流 |
 | `GET` | `/api/focus/sessions/{id}/history` | 持久化事件历史 |
+| `POST` | `/api/robot/pair` | 内存热配对机器人；供同源 Web UI 使用 |
 | `GET` | `/health` | SDK 与四个模型服务健康状态 |
 
 ## 项目结构
@@ -155,7 +159,7 @@ SparkHT/
 .venv/bin/pytest
 ```
 
-当前交付基线为 80 项自动测试。贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+当前交付基线为 85 项自动测试。贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 真实链路基准：
 
