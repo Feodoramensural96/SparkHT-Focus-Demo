@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
@@ -113,7 +110,8 @@ footer{padding:0 34px 24px;color:#647a9d;font-size:12px}@media(max-width:850px){
 <script>
 const qs=new URLSearchParams(location.search),sid=qs.get('session');
 const pct=v=>v==null?'—':Math.round(v*100)+'%';
+const ui={presence:document.querySelector('#presence'),phone:document.querySelector('#phone'),drink:document.querySelector('#drink'),score:document.querySelector('#score'),frame:document.querySelector('#frame')};
 async function health(){try{const x=await fetch('/health').then(r=>r.json());document.querySelector('#health').textContent=JSON.stringify(x.components)}catch{document.querySelector('#health').textContent='健康检查失败'}}health();
 if(sid){document.querySelector('#frame').src=`/api/focus/sessions/${sid}/frames/latest`;document.querySelector('#empty').hidden=true;
-const es=new EventSource(`/api/focus/sessions/${sid}/events`);['stats.updated','camera.frame_captured','vision.batch_started','vision.batch_paused','vision.batch_completed','vision.batch_failed','service.degraded','session.state_changed'].forEach(t=>es.addEventListener(t,e=>{const x=JSON.parse(e.data);const line=document.createElement('div');line.className='event';line.textContent=`${x.occurred_at}  ${x.type}  ${JSON.stringify(x.data)}`;document.querySelector('#timeline').prepend(line);if(x.type==='stats.updated'){const d=x.data;presence.textContent=pct(d.presence_ratio);phone.textContent=pct(d.phone_visible_ratio);drink.textContent=d.suspected_drink_events;score.textContent=d.focus_proxy_score==null?'—':Math.round(d.focus_proxy_score)}if(x.type==='camera.frame_captured'){frame.src=`/api/focus/sessions/${sid}/frames/latest?t=${Date.now()}`}}));}
+const es=new EventSource(`/api/focus/sessions/${sid}/events`);['stats.updated','camera.frame_captured','vision.batch_started','vision.batch_paused','vision.batch_completed','vision.batch_failed','service.degraded','session.state_changed'].forEach(t=>es.addEventListener(t,e=>{const x=JSON.parse(e.data);const line=document.createElement('div');line.className='event';line.textContent=`${x.occurred_at}  ${x.type}  ${JSON.stringify(x.data)}`;document.querySelector('#timeline').prepend(line);if(x.type==='stats.updated'){const d=x.data;ui.presence.textContent=pct(d.presence_ratio);ui.phone.textContent=pct(d.phone_visible_ratio);ui.drink.textContent=d.suspected_drink_events;ui.score.textContent=d.focus_proxy_score==null?'—':Math.round(d.focus_proxy_score)}if(x.type==='camera.frame_captured'){ui.frame.src=`/api/focus/sessions/${sid}/frames/latest?t=${Date.now()}`}}));}
 </script></body></html>"""

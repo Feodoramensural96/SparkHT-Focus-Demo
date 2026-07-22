@@ -14,7 +14,12 @@ class Frame:
 def test_four_frames_form_batch_and_tail_rules() -> None:
     builder = BatchBuilder(batch_size=4)
     assert all(builder.add(Frame(f"f-{i}")) is None for i in range(1, 4))
-    assert [f.frame_id for f in builder.add(Frame("f-4"))] == ["f-1", "f-2", "f-3", "f-4"]
+    assert [f.frame_id for f in builder.add(Frame("f-4"))] == [
+        "f-1",
+        "f-2",
+        "f-3",
+        "f-4",
+    ]
     builder.add(Frame("f-5"))
     assert builder.flush_tail() is None
     builder.add(Frame("f-6"))

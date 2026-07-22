@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from focus.models import FocusEvent, FocusReport, FocusSession, SessionState
@@ -29,7 +31,9 @@ class FileSessionStore:
         )
 
     def load_session(self, session_id: str) -> FocusSession:
-        raw = (self.session_dir(session_id) / "session.json").read_text(encoding="utf-8")
+        raw = (self.session_dir(session_id) / "session.json").read_text(
+            encoding="utf-8"
+        )
         return FocusSession.model_validate_json(raw)
 
     def save_report(self, report: FocusReport) -> None:
@@ -62,6 +66,27 @@ class FileSessionStore:
             self.save_session(session)
             changed.append(session.session_id)
         return changed
+
+    def cleanup_expired(
+        self, *, retention_hours: float = 24.0, now: datetime | None = None
+    ) -> list[str]:
+        if retention_hours <= 0:
+            raise ValueError("retention_hours must be positive")
+        cutoff = (now or datetime.now(UTC)).timestamp() - timedelta(
+            hours=retention_hours
+        ).total_seconds()
+        removed: list[str] = []
+        for directory in self.root.iterdir():
+            if (
+                not directory.is_dir()
+                or directory.is_symlink()
+                or not (directory / "session.json").is_file()
+                or directory.stat().st_mtime >= cutoff
+            ):
+                continue
+            shutil.rmtree(directory)
+            removed.append(directory.name)
+        return sorted(removed)
 
     @staticmethod
     def _atomic_json(path: Path, payload: dict) -> None:

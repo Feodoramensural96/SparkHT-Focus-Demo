@@ -4,8 +4,6 @@ import asyncio
 import time
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
-
 from .aggregator import FocusAggregator
 from .events import EventHub
 from .infrastructure.session_store import FileSessionStore
@@ -39,6 +37,8 @@ class FocusService:
         tts: TtsPort | None = None,
         demo_capture_interval: float = 10.0,
         normal_capture_interval: float = 30.0,
+        demo_duration_seconds: int = 90,
+        normal_duration_seconds: int = 1_500,
         batch_size: int = 4,
         voice_idle_seconds: float = 5.0,
         events: EventHub | None = None,
@@ -51,6 +51,8 @@ class FocusService:
         self.tts = tts
         self.demo_capture_interval = demo_capture_interval
         self.normal_capture_interval = normal_capture_interval
+        self.demo_duration_seconds = demo_duration_seconds
+        self.normal_duration_seconds = normal_duration_seconds
         self.batch_builder = BatchBuilder(batch_size=batch_size)
         self.events = events or EventHub(max_events=200)
         self._lock = asyncio.Lock()
@@ -73,8 +75,8 @@ class FocusService:
     def active_session(self) -> FocusSession | None:
         return self._active
 
-
     async def start(self) -> None:
+        self.store.cleanup_expired()
         self.store.mark_unfinished_interrupted()
         if self._scheduler is not None:
             await self._scheduler.start()
@@ -95,10 +97,17 @@ class FocusService:
             if self._active is not None and self._active.state not in _TERMINAL:
                 return self._active, True
             now = datetime.now(UTC)
+            duration = request.duration_seconds
+            if "duration_seconds" not in request.model_fields_set:
+                duration = (
+                    self.demo_duration_seconds
+                    if request.mode is FocusMode.DEMO
+                    else self.normal_duration_seconds
+                )
             session = FocusSession(
                 session_id=f"fs_{now.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}",
                 mode=request.mode,
-                duration_seconds=request.duration_seconds,
+                duration_seconds=duration,
                 state=SessionState.RUNNING,
                 created_at=now,
                 started_at=now,
@@ -108,9 +117,25 @@ class FocusService:
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
             if self.robot is not None and self.vision is not None:
-                await self.robot.warmup_camera()
+                try:
+                    await self.robot.warmup_camera()
+                except Exception as error:
+                    session.state = SessionState.FAILED
+                    session.ended_at = datetime.now(UTC)
+                    session.degraded_components["watcher_sdk"] = str(error)[:200]
+                    self.store.save_session(session)
+                    self._emit(
+                        session,
+                        "service.degraded",
+                        {"component": "watcher_sdk", "reason": str(error)[:200]},
+                    )
+                    self._emit(
+                        session, "session.state_changed", {"state": session.state.value}
+                    )
+                    return session, False
                 self._capture_task = asyncio.create_task(
-                    self._capture_loop(session.session_id), name=f"capture-{session.session_id}"
+                    self._capture_loop(session.session_id),
+                    name=f"capture-{session.session_id}",
                 )
                 self._timer_task = asyncio.create_task(
                     self._auto_stop(session.session_id, session.duration_seconds),
@@ -141,6 +166,7 @@ class FocusService:
             self.store.save_report(report)
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            self.store.cleanup_expired()
             return session
 
     async def cancel_session(self, session_id: str) -> FocusSession:
@@ -172,8 +198,12 @@ class FocusService:
     async def health(self) -> HealthResponse:
         components: dict[str, ComponentHealth] = {}
         components["watcher_sdk"] = ComponentHealth(
-            status="healthy" if self.robot is not None and self.robot.connected else "unhealthy",
-            reason=None if self.robot is not None and self.robot.connected else "sdk_not_connected",
+            status="healthy"
+            if self.robot is not None and self.robot.connected
+            else "unhealthy",
+            reason=None
+            if self.robot is not None and self.robot.connected
+            else "sdk_not_connected",
         )
         checks = (
             ("asr", self.asr, "qwen_asr"),
@@ -222,7 +252,23 @@ class FocusService:
                 frame = await self.robot.capture(destination, frame_id, sequence)  # type: ignore[union-attr]
             except Exception as error:
                 session.failed_frames += 1
-                self._emit(session, "camera.capture_failed", {"error": str(error)[:200]})
+                self._emit(
+                    session, "camera.capture_failed", {"error": str(error)[:200]}
+                )
+                if not self.robot.connected:  # type: ignore[union-attr]
+                    session.state = SessionState.FAILED
+                    session.ended_at = datetime.now(UTC)
+                    session.degraded_components["watcher_sdk"] = "disconnected"
+                    self.store.save_session(session)
+                    self._emit(
+                        session,
+                        "service.degraded",
+                        {"component": "watcher_sdk", "reason": "disconnected"},
+                    )
+                    self._emit(
+                        session, "session.state_changed", {"state": session.state.value}
+                    )
+                    break
             else:
                 session.captured_frames += 1
                 self.store.save_session(session)
@@ -259,7 +305,10 @@ class FocusService:
 
     async def _analysis_completed(self, analysis: BatchAnalysis) -> None:
         session = self._active
-        if session is None or session.state not in {SessionState.RUNNING, SessionState.FINALIZING}:
+        if session is None or session.state not in {
+            SessionState.RUNNING,
+            SessionState.FINALIZING,
+        }:
             return
         if analysis.status == "completed":
             self._aggregators[session.session_id].add_many(analysis.observations)
@@ -302,7 +351,7 @@ class FocusService:
 
     def _build_report(self, session: FocusSession) -> FocusReport:
         stats = session.stats
-        duration_minutes = (session.duration_seconds / 60)
+        duration_minutes = session.duration_seconds / 60
         if stats.focus_proxy_score is None:
             summary = "本次统计有效视觉样本不足，无法计算专注趋势。以上仅供参考。"
         else:
@@ -337,3 +386,7 @@ class FocusService:
         )
         self.events.publish(event)
         self.store.append_event(event)
+
+    def emit_voice_event(self, event_type: str, data: dict) -> None:
+        if self._active is not None:
+            self._emit(self._active, event_type, data)

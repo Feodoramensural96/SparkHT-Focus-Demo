@@ -16,7 +16,9 @@ SYSTEM_PROMPT = """你是低分辨率桌面场景的时间序列观察器。输�
 看不清时必须输出 uncertain，不要猜测。
 只返回符合给定 schema 的 JSON，不输出 Markdown 或解释。"""
 
-CORRECTION_PROMPT = "仅修复上一响应的 JSON 格式和 schema，不增加、删除或猜测观察结果。只返回 JSON。"
+CORRECTION_PROMPT = (
+    "仅修复上一响应的 JSON 格式和 schema，不增加、删除或猜测观察结果。只返回 JSON。"
+)
 
 RESPONSE_SCHEMA_PROMPT = """返回对象必须严格采用以下结构，每个输入 frame_id 恰好出现一次且保持顺序：
 {"frames":[{"frame_id":"f-001","person":"present|absent|uncertain","phone":"visible|not_visible|uncertain","cup":"visible|not_visible|uncertain","cup_motion":"stable|changed|uncertain","confidence":0.0,"evidence":"不超过30个中文字"}]}"""

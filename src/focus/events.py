@@ -26,7 +26,9 @@ class EventHub:
                     pass
                 queue.put_nowait(event)
 
-    def replay(self, session_id: str, last_event_id: str | None = None) -> list[FocusEvent]:
+    def replay(
+        self, session_id: str, last_event_id: str | None = None
+    ) -> list[FocusEvent]:
         matching = [event for event in self._events if event.session_id == session_id]
         if last_event_id is None:
             return matching

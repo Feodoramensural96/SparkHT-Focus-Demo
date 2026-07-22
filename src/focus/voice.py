@@ -38,7 +38,9 @@ class EnergyVad:
             elif buffered:
                 buffered.append(chunk)
                 silence += 1
-            if buffered and (silence >= self.silence_chunks or len(buffered) >= self.max_chunks):
+            if buffered and (
+                silence >= self.silence_chunks or len(buffered) >= self.max_chunks
+            ):
                 if voiced >= self.min_voice_chunks:
                     yield b"".join(buffered)
                 buffered, voiced, silence = [], 0, 0
@@ -102,12 +104,27 @@ class VoiceController:
         active = getattr(self.service, "active_session", None)
         if active is None:
             active = getattr(self.service, "session", None)
+        emit = getattr(self.service, "emit_voice_event", None)
+        if emit is not None and active is not None:
+            emit("voice.turn_started", {"transcript": transcript[:80]})
 
         if intent is FocusIntent.START:
-            _, reused = await self.service.create_session(FocusSessionCreate())
-            reply = "专注统计已经在进行中。" if reused else "好的，已开始专注统计，我会在结束时告诉你结果。"
+            session, reused = await self.service.create_session(FocusSessionCreate())
+            if emit is not None and active is None:
+                emit("voice.turn_started", {"transcript": transcript[:80]})
+            if session.state is SessionState.FAILED:
+                reply = "机器人连接或相机暂时不可用，专注统计未能启动。"
+            else:
+                reply = (
+                    "专注统计已经在进行中。"
+                    if reused
+                    else "好的，已开始专注统计，我会在结束时告诉你结果。"
+                )
         elif intent is FocusIntent.STATUS:
-            if active is None or active.state in {SessionState.COMPLETED, SessionState.CANCELLED}:
+            if active is None or active.state in {
+                SessionState.COMPLETED,
+                SessionState.CANCELLED,
+            }:
                 reply = "当前没有正在进行的专注统计。"
             else:
                 reply = f"目前已采集 {active.captured_frames} 帧，分析 {active.stats.analyzed_frames} 帧。"
@@ -144,4 +161,12 @@ class VoiceController:
                 await self.robot.play_pcm(self.tts.synthesize(reply))
             except Exception:
                 pass
+        if emit is not None:
+            emit(
+                "voice.turn_completed",
+                {
+                    "transcript": transcript[:80],
+                    "intent": intent.value if intent else None,
+                },
+            )
         return reply

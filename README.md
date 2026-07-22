@@ -51,6 +51,13 @@ FOCUS_ENABLE_ROBOT=false .venv/bin/focus-demo
 
 测试默认使用 fake/spy 和 HTTP mock，不需要 GPU、模型或机器人。
 
+真实本地快链路基准和同连接 SDK 三能力冒烟：
+
+```bash
+.venv/bin/python scripts/benchmark_fast_chain.py
+WATCHER_PAIRING_CODE=屏幕六位码 .venv/bin/python scripts/smoke_watcher_sdk.py
+```
+
 ## 边界
 
 - 不做 OCR、身份识别、情绪识别或工作内容判断。

@@ -25,6 +25,7 @@ class FocusSettings(BaseSettings):
     watcher_sdk_host: str = "auto"
 
     focus_demo_duration_seconds: int = 90
+    focus_normal_duration_seconds: int = 1_500
     focus_demo_capture_interval_seconds: float = 10.0
     focus_normal_capture_interval_seconds: float = 30.0
     focus_batch_size: int = 4

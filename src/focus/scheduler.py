@@ -20,7 +20,10 @@ class BatchBuilder(Generic[FrameT]):
         self._frames.append(frame)
         if len(self._frames) < self.batch_size:
             return None
-        batch, self._frames = self._frames[: self.batch_size], self._frames[self.batch_size :]
+        batch, self._frames = (
+            self._frames[: self.batch_size],
+            self._frames[self.batch_size :],
+        )
         return batch
 
     def flush_tail(self) -> list[FrameT] | None:
@@ -79,7 +82,9 @@ class VisionPriorityScheduler(Generic[FrameT, ResultT]):
     async def start(self) -> None:
         if self._worker is None:
             self._stopping = False
-            self._worker = asyncio.create_task(self._run(), name="focus-vision-scheduler")
+            self._worker = asyncio.create_task(
+                self._run(), name="focus-vision-scheduler"
+            )
 
     def submit(self, batch: list[FrameT]) -> None:
         if not batch:

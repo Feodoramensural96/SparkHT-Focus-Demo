@@ -58,7 +58,9 @@ async def test_multimage_contract_preserves_order_and_constraints(tmp_path) -> N
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        client = StepFunVlmClient(http=http, base_url="http://step/v1", model="step3-vl-focus")
+        client = StepFunVlmClient(
+            http=http, base_url="http://step/v1", model="step3-vl-focus"
+        )
         result = await client.analyze(frames)
 
     assert result.status == "completed"
@@ -66,7 +68,9 @@ async def test_multimage_contract_preserves_order_and_constraints(tmp_path) -> N
     assert requests[0]["max_tokens"] == 192
     assert requests[0]["model"] == "step3-vl-focus"
     content = requests[0]["messages"][1]["content"]
-    image_urls = [part["image_url"]["url"] for part in content if part["type"] == "image_url"]
+    image_urls = [
+        part["image_url"]["url"] for part in content if part["type"] == "image_url"
+    ]
     assert len(image_urls) == 2
     assert image_urls[0] != image_urls[1]
 
@@ -87,7 +91,9 @@ async def test_invalid_json_gets_exactly_one_correction_retry(tmp_path) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(200, json={"choices": [{"message": {"content": "not json"}}]})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "not json"}}]}
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = StepFunVlmClient(http=http, base_url="http://step/v1", model="step3")

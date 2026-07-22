@@ -7,7 +7,12 @@ import uuid
 import httpx
 
 from focus.models import BatchAnalysis, CapturedFrame
-from focus.prompts import CORRECTION_PROMPT, SYSTEM_PROMPT, parse_stepfun_response, user_prompt
+from focus.prompts import (
+    CORRECTION_PROMPT,
+    SYSTEM_PROMPT,
+    parse_stepfun_response,
+    user_prompt,
+)
 
 
 class StepFunVlmClient:
@@ -62,7 +67,13 @@ class StepFunVlmClient:
                     [frame.frame_id for frame in frames],
                     {frame.frame_id: frame.captured_at for frame in frames},
                 )
-            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as error:
+            except (
+                httpx.HTTPError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ) as error:
                 last_error = error
                 continue
             return BatchAnalysis(

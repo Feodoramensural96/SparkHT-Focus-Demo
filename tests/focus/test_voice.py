@@ -2,8 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from focus.intent import FocusIntent
-from focus.models import FocusMode, FocusReport, FocusSession, FocusStats, SessionState
+from focus.models import FocusMode, FocusSession, FocusStats, SessionState
 from focus.voice import VoiceController
 
 
@@ -33,7 +32,9 @@ class FakeFocusService:
         return self.session
 
     def get_report(self, session_id):
-        return SimpleNamespace(focus_proxy_score=88, presence_ratio=.9, phone_visible_ratio=.1)
+        return SimpleNamespace(
+            focus_proxy_score=88, presence_ratio=0.9, phone_visible_ratio=0.1
+        )
 
 
 class FakeRobot:
@@ -54,7 +55,9 @@ class FakeTts:
 async def test_deterministic_start_status_stop_and_voice_priority() -> None:
     service = FakeFocusService()
     robot = FakeRobot()
-    controller = VoiceController(service=service, robot=robot, asr=None, llm=None, tts=FakeTts())
+    controller = VoiceController(
+        service=service, robot=robot, asr=None, llm=None, tts=FakeTts()
+    )
     assert "已开始" in await controller.handle_transcript("开始专注统计")
     assert "4 帧" in await controller.handle_transcript("统计到哪了")
     assert "专注趋势 88 分" in await controller.handle_transcript("结束专注并生成总结")

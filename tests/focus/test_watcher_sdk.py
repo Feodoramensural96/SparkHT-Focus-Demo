@@ -29,6 +29,7 @@ class FakeRobot:
         self.capture_calls = 0
         self.audio_chunks: list[bytes] = []
         self.closed = False
+        self._closed = False
         self.camera = self.Camera(self)
         self.audio = self.Audio(self)
         self.microphone = self.Microphone()
@@ -65,7 +66,9 @@ class FakeRobot:
 
 
 @pytest.mark.asyncio
-async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic(tmp_path) -> None:
+async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic(
+    tmp_path,
+) -> None:
     robot = FakeRobot()
     factory_calls = 0
 
@@ -76,6 +79,10 @@ async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic
 
     adapter = WatcheRobotAdapter(pairing_code="123456", robot_factory=factory)
     await adapter.connect()
+    assert adapter.connected is True
+    robot._closed = True
+    assert adapter.connected is False
+    robot._closed = False
     await adapter.warmup_camera()
     destination = tmp_path / "frame.jpg"
     frame = await adapter.capture(destination, "f-1", 1)

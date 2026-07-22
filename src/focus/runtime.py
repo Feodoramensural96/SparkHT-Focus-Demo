@@ -58,6 +58,8 @@ class FocusRuntime:
             tts=self.tts,
             demo_capture_interval=settings.focus_demo_capture_interval_seconds,
             normal_capture_interval=settings.focus_normal_capture_interval_seconds,
+            demo_duration_seconds=settings.focus_demo_duration_seconds,
+            normal_duration_seconds=settings.focus_normal_duration_seconds,
             batch_size=settings.focus_batch_size,
             voice_idle_seconds=settings.focus_voice_idle_seconds,
         )
