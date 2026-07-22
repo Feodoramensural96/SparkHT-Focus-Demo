@@ -70,7 +70,7 @@ def test_health_is_unhealthy_without_sdk_but_model_degradation_is_distinct(
     assert response.json()["components"]["stepfun_vlm"]["status"] == "degraded"
 
 
-def test_dashboard_uses_compact_vertical_regions_and_real_model_name(tmp_path) -> None:
+def test_dashboard_uses_ultrawide_regions_and_real_model_name(tmp_path) -> None:
     client, _ = make_client(tmp_path)
     response = client.get("/")
     assert response.status_code == 200
@@ -83,14 +83,20 @@ def test_dashboard_uses_compact_vertical_regions_and_real_model_name(tmp_path) -
         "Step3-VL-10B-FP8",
         "机器人上行 · 麦克风 → SparkHT",
         "机器人下行 · SparkHT → 扬声器",
+        "带鱼屏横向全景监控",
+        "最近 4 条",
     ):
         assert text in response.text
     assert "fetch('/api/focus/active')" in response.text
     assert "fetch('/api/focus/recent')" in response.text
     assert "最近 Step3 批次" in response.text
-    assert "display:flex;flex-direction:column" in response.text
+    assert 'grid-template-areas:"top top top top"' in response.text
+    assert '"metrics frame conversation status"' in response.text
+    assert '"metrics frame conversation timeline"' in response.text
     assert "width:640px;max-width:100%;aspect-ratio:4/3" in response.text
-    assert "grid-template-columns" not in response.text
+    assert "MAX_DIALOGUES=4" in response.text
+    assert "items.slice(0,-MAX_DIALOGUES).forEach" in response.text
+    assert "conversation.scrollTo" in response.text
     for element_id in (
         "frame",
         "presence",
