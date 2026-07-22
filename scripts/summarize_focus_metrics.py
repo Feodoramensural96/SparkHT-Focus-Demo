@@ -61,6 +61,7 @@ def summarize(path: Path) -> dict[str, object]:
         event["data"]["speech_to_first_audio_ms"]
         for event in events
         if event["type"] == "voice.turn_completed"
+        and event["data"].get("source") != "session_timer"
         and isinstance(event["data"].get("speech_to_first_audio_ms"), int)
     ]
     return {
