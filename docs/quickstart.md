@@ -28,12 +28,15 @@ cd SparkHT-Focus
 
 python3.12 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install --extra-index-url https://test.pypi.org/simple \
-  -e '.[test,model]'
+.venv/bin/pip install 'websockets>=12,<16'
+.venv/bin/pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --no-deps watcherobot==0.1.0a4
+.venv/bin/pip install -e '.[test,model]'
 cp .env.example .env
 ```
 
-`watcherobot==0.1.0a4` 当前发布在 TestPyPI，因此安装命令必须保留 `--extra-index-url`。不要在 `.env` 中写入准备提交的配对码。
+`watcherobot==0.1.0a4` 当前发布在 TestPyPI，因此单独从 TestPyPI 安装并使用 `--no-deps`；其他依赖仍只从正式 PyPI 解析，避免 TestPyPI 参与普通依赖选择。不要在 `.env` 中写入准备提交的配对码。
 
 ## 3. 先验证网关
 
@@ -52,6 +55,12 @@ curl -I http://127.0.0.1:8780/
 
 此时仪表盘与 API 应可访问。未启动的 ASR、LLM、TTS 或 VLM 会在健康状态中显示不可用，但不妨碍检查 Web 层。
 
+也可以使用仓库预检脚本完成同样的检查：
+
+```bash
+scripts/check_focus_services.sh
+```
+
 创建一个 90 秒 Demo 会话：
 
 ```bash
@@ -66,6 +75,12 @@ curl -fsS -X POST http://127.0.0.1:8780/api/focus/sessions \
 .venv/bin/ruff format --check src tests scripts
 .venv/bin/ruff check src tests scripts
 .venv/bin/pytest
+```
+
+完成 HTTP 层验证后按 `Ctrl+C` 停止这个离线网关。`FOCUS_ENABLE_ROBOT=false` 会有意禁用 Web 配对回调；接入机器人前必须改用正常模式重新启动：
+
+```bash
+.venv/bin/focus-demo
 ```
 
 ## 4. 准备快系统服务
@@ -85,7 +100,12 @@ ollama pull qwen3:0.6b
 ollama list
 ```
 
-ASR 与 TTS 服务由部署环境提供，本仓库只实现 HTTP 客户端。若服务使用不同端口或模型名，请修改 `.env`，不要修改源码默认值。
+ASR 与 TTS 服务由部署环境提供，本仓库只实现 HTTP 客户端，不包含其模型权重或服务端安装脚本。兼容服务必须满足以下最小契约：
+
+- ASR：`GET /health`；`POST /v1/audio/transcriptions` 接收 `audio.wav` multipart 文件和 `language=zh`，返回 `{"text":"..."}`。
+- TTS：`GET /health`；`POST /v1/audio/speech` 接收 OpenAI 风格 JSON，其中包含 `input`、`model`、`voice`、`language=Chinese`、`response_format=pcm` 和 `stream=true`，响应为 24 kHz、16-bit、单声道 PCM 字节流。
+
+若使用其他兼容服务或端口，请修改 `.env` 中的 `QWEN_ASR_BASE_URL`、`QWEN_TTS_BASE_URL`、模型和音色，不要修改源码默认值。仅有健康接口返回 200 还不够；完整服务启动后应执行第 7 节的真实链路检查。
 
 ## 5. 准备 Step3-VL
 
@@ -116,11 +136,18 @@ py -3.12 -m venv .hf-venv
 scp -r .\Step3-VL-10B-FP8 <user>@<spark-ip>:/path/to/SparkHT-Focus/.models/
 ```
 
-传输后必须校验并启动：
+传输后必须校验并启动。启动脚本会在前台持续运行，因此请使用两个终端：
 
 ```bash
+# 终端 A
 scripts/verify_step3_model.sh
 scripts/start_step3_vllm.sh
+```
+
+等待终端 A 显示服务已启动，再在终端 B 验证：
+
+```bash
+# 终端 B
 curl -fsS http://127.0.0.1:8040/v1/models
 ```
 
@@ -147,7 +174,13 @@ SDK 支持双向发现，默认 `WATCHER_SDK_HOST=auto`。若电脑同时有 Wi-
 
 ## 7. 完整验收
 
-打开 `http://<spark-ip>:8780/`，依次验证：
+先确认网关以正常模式运行，并执行自动预检。`--full` 不仅检查端口，还会真实调用一次 ASR、Ollama 和流式 TTS：
+
+```bash
+scripts/check_focus_services.sh --full
+```
+
+预检全部通过后，打开 `http://<spark-ip>:8780/`，依次验证：
 
 1. 健康卡片显示机器人、ASR、Ollama、TTS 与 Step3-VL 状态；
 2. 说“开始专注”，机器人执行开始动作并循环播放专注表情；
@@ -159,7 +192,11 @@ SDK 支持双向发现，默认 `WATCHER_SDK_HOST=auto`。若电脑同时有 Wi-
 
 ### 仪表盘可用，但健康检查显示模型离线
 
-逐个执行第 4、5 节中的最小验证。模型服务监听在 `127.0.0.1` 时只能由同一台 Spark 访问，这是推荐的默认安全配置。
+逐个执行第 4、5 节中的最小验证，再运行 `scripts/check_focus_services.sh --full`。模型服务监听在 `127.0.0.1` 时只能由同一台 Spark 访问，这是推荐的默认安全配置。
+
+### Web 配对提示“机器人配对功能未启用”
+
+当前网关仍由 `FOCUS_ENABLE_ROBOT=false` 启动。按 `Ctrl+C` 停止它，再运行 `.venv/bin/focus-demo`；不要让两个网关同时争用 8780 端口。
 
 ### 机器人无法发现网关
 

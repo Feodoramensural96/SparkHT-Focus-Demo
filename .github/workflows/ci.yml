@@ -30,9 +30,11 @@ jobs:
       - name: Install project and test tools
         run: |
           python -m pip install --upgrade pip
+          python -m pip install 'websockets>=12,<16'
           python -m pip install \
-            --extra-index-url https://test.pypi.org/simple \
-            -e '.[test]'
+            --index-url https://test.pypi.org/simple/ \
+            --no-deps watcherobot==0.1.0a4
+          python -m pip install -e '.[test]'
 
       - name: Check Python formatting
         run: ruff format --check src tests scripts

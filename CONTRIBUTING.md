@@ -7,8 +7,11 @@
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install --extra-index-url https://test.pypi.org/simple \
-  -e '.[test,model]'
+.venv/bin/pip install 'websockets>=12,<16'
+.venv/bin/pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --no-deps watcherobot==0.1.0a4
+.venv/bin/pip install -e '.[test,model]'
 ```
 
 ## 提交前检查

@@ -139,14 +139,17 @@ Python 3.12 is required. Keep the gateway and vLLM in separate virtual environme
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install --extra-index-url https://test.pypi.org/simple \
-  -e '.[test,model]'
+.venv/bin/pip install 'websockets>=12,<16'
+.venv/bin/pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --no-deps watcherobot==0.1.0a4
+.venv/bin/pip install -e '.[test,model]'
 cp .env.example .env
 
 FOCUS_ENABLE_ROBOT=false .venv/bin/focus-demo
 ```
 
-Open `http://127.0.0.1:8780/` and check `http://127.0.0.1:8780/health`. Model services may appear unavailable in this gateway-only mode.
+Open `http://127.0.0.1:8780/` and check `http://127.0.0.1:8780/health`. Model services may appear unavailable in this gateway-only mode. This mode also disables Web pairing: stop it with `Ctrl+C`, then run `.venv/bin/focus-demo` for the complete gateway. Use `scripts/check_focus_services.sh --full` to probe every local service and execute one real fast-path request.
 
 For model setup, Windows-to-Spark weight transfer, firewall rules, dual-NIC troubleshooting, and robot pairing, follow the Chinese [complete quick-start guide](docs/quickstart.md) and [configuration reference](docs/configuration.md).
 

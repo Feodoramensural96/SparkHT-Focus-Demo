@@ -180,8 +180,11 @@ flowchart LR
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install --extra-index-url https://test.pypi.org/simple \
-  -e '.[test,model]'
+.venv/bin/pip install 'websockets>=12,<16'
+.venv/bin/pip install \
+  --index-url https://test.pypi.org/simple/ \
+  --no-deps watcherobot==0.1.0a4
+.venv/bin/pip install -e '.[test,model]'
 cp .env.example .env
 ```
 
@@ -190,6 +193,8 @@ cp .env.example .env
 ```bash
 FOCUS_ENABLE_ROBOT=false .venv/bin/focus-demo
 ```
+
+此模式只用于检查 HTTP 层，并会禁用 Web 配对。验证后按 `Ctrl+C` 停止，再用 `.venv/bin/focus-demo` 启动完整网关。运行 `scripts/check_focus_services.sh --full` 可检查全部本地服务并真实调用一次快链路。
 
 ### 2. 启动 Step3-VL
 
