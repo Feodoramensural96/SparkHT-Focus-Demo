@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -97,3 +98,15 @@ async def test_accelerated_session_captures_two_batches_and_builds_report(
     assert report.presence_ratio == 1.0
     assert report.phone_visible_ratio == 0.0
     assert report.focus_proxy_score == 100.0
+    events = [
+        json.loads(line)
+        for line in (tmp_path / session.session_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    completed = [
+        event for event in events if event["type"] == "vision.batch_completed"
+    ]
+    assert len(completed) >= 2
+    assert len(completed[0]["data"]["observations"]) == 4
+    assert completed[0]["data"]["model_name"] == "fake-step3"

@@ -320,7 +320,15 @@ class FocusService:
             self._emit(
                 session,
                 "vision.batch_completed",
-                {"batch_id": analysis.batch_id, "latency_ms": analysis.latency_ms},
+                {
+                    "batch_id": analysis.batch_id,
+                    "latency_ms": analysis.latency_ms,
+                    "model_name": analysis.model_name,
+                    "observations": [
+                        observation.model_dump(mode="json")
+                        for observation in analysis.observations
+                    ],
+                },
             )
             self._emit(session, "stats.updated", session.stats.model_dump(mode="json"))
         else:

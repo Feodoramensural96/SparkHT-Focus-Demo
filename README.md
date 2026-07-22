@@ -50,8 +50,12 @@ scripts/start_step3_vllm.sh
 服务就绪后，`http://127.0.0.1:8040/v1/models` 应返回 `step3-vl-focus`。可用一至四张本地图重复执行真实协议与时延检查：
 
 ```bash
+scripts/verify_step3_model.sh
 .venv/bin/python scripts/benchmark_step3_vlm.py --runs 3 frame-1.jpg frame-2.jpg
 ```
+
+启动脚本会先检查运行所需的小文件，并校验五个权重分片的官方
+SHA-256；局域网传输不完整或文件损坏时不会尝试加载模型。
 
 ## API
 
