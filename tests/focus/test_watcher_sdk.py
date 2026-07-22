@@ -62,6 +62,8 @@ class FakeRobot:
         self.animation_supported = True
         self.behavior_supported = True
         self.motion_supported = True
+        self.light_supported = True
+        self.light_calls: list[dict] = []
         self.closed = False
         self._closed = False
         self.camera = self.Camera(self)
@@ -70,6 +72,7 @@ class FakeRobot:
         self.animation = self.Animation(self)
         self.behavior = self.Behavior(self)
         self.motion = self.Motion(self)
+        self.lights = self.Lights(self)
 
     class Camera:
         def __init__(self, parent) -> None:
@@ -131,11 +134,21 @@ class FakeRobot:
             self.parent.motion_jobs.append(job)
             return job
 
+    class Lights:
+        def __init__(self, parent) -> None:
+            self.parent = parent
+
+        def set_color(self, color, *, brightness=1.0, zone="all"):
+            self.parent.light_calls.append(
+                {"color": color, "brightness": brightness, "zone": zone}
+            )
+
     def supports(self, capability):
         return {
             "animation": self.animation_supported,
             "behavior": self.behavior_supported,
             "motion": self.motion_supported,
+            "light": self.light_supported,
         }.get(capability, True)
 
     def close(self):
@@ -176,6 +189,24 @@ async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic
     assert frame.path == destination
     assert robot.audio_chunks == [b"\x00\x00" * 10 + b"\x01\x00" * 10]
     assert adapter.last_playback_started_at is not None
+
+
+@pytest.mark.asyncio
+async def test_light_uses_all_zones_at_full_brightness() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    assert await adapter.set_light("#FFFF00", brightness=1.0) is True
+    assert robot.light_calls == [
+        {"color": "#FFFF00", "brightness": 1.0, "zone": "all"}
+    ]
+
+    robot.light_supported = False
+    assert await adapter.set_light("#FFFFFF") is False
+    assert len(robot.light_calls) == 1
 
 
 @pytest.mark.asyncio

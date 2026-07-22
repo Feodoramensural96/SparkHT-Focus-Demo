@@ -91,6 +91,7 @@ class FocusRuntime:
             if not self.robot.connected:
                 try:
                     await self.robot.connect()
+                    await self.service.refresh_light()
                 except asyncio.CancelledError:
                     raise
                 except Exception:

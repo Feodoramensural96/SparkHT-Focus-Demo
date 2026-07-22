@@ -34,6 +34,7 @@ class AnimationRobot:
     def __init__(self) -> None:
         self.connected = False
         self.animation_ids: list[str] = []
+        self.light_colors: list[tuple[str, float]] = []
 
     async def connect(self) -> None:
         self.connected = True
@@ -43,6 +44,10 @@ class AnimationRobot:
 
     async def play_animation(self, animation_id: str) -> bool:
         self.animation_ids.append(animation_id)
+        return True
+
+    async def set_light(self, color: str, *, brightness: float = 1.0) -> bool:
+        self.light_colors.append((color, brightness))
         return True
 
 
@@ -81,6 +86,41 @@ async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) ->
         "thinking",
         "concentration",
     ]
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_light_priority_camera_voice_focus_default(tmp_path) -> None:
+    robot = AnimationRobot()
+    service = FocusService(store=FileSessionStore(tmp_path), robot=robot, vision=None)
+    await service.start()
+    assert robot.light_colors[-1] == ("#FFFFFF", 1.0)
+
+    service._active = FocusSession(
+        session_id="fs_light",
+        mode=FocusMode.DEMO,
+        duration_seconds=90,
+        state=SessionState.RUNNING,
+    )
+    await service.refresh_light()
+    assert robot.light_colors[-1] == ("#0000FF", 1.0)
+
+    await service.show_voice_state(RobotPresentationState.LISTENING)
+    assert robot.light_colors[-1] == ("#00FF00", 1.0)
+
+    await service._set_camera_light(True)
+    assert robot.light_colors[-1] == ("#FFFF00", 1.0)
+    await service.show_voice_state(RobotPresentationState.SPEAKING)
+    assert robot.light_colors[-1] == ("#FFFF00", 1.0)
+
+    await service._set_camera_light(False)
+    assert robot.light_colors[-1] == ("#00FF00", 1.0)
+    await service.show_voice_state(RobotPresentationState.THINKING)
+    assert robot.light_colors[-1] == ("#0000FF", 1.0)
+
+    service._active.state = SessionState.COMPLETED
+    await service.refresh_light()
+    assert robot.light_colors[-1] == ("#FFFFFF", 1.0)
     await service.close()
 
 

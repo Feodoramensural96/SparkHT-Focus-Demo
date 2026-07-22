@@ -24,6 +24,10 @@ from .scheduler import BatchBuilder, VisionPriorityScheduler
 
 
 _TERMINAL = {SessionState.COMPLETED, SessionState.CANCELLED, SessionState.FAILED}
+_LIGHT_DEFAULT = "#FFFFFF"
+_LIGHT_FOCUS = "#0000FF"
+_LIGHT_VOICE = "#00FF00"
+_LIGHT_CAMERA = "#FFFF00"
 
 
 class FocusService:
@@ -66,6 +70,9 @@ class FocusService:
         self._capture_task: asyncio.Task[None] | None = None
         self._timer_task: asyncio.Task[None] | None = None
         self._voice_busy = False
+        self._voice_light_active = False
+        self._camera_light_depth = 0
+        self._light_lock = asyncio.Lock()
         self._scheduler: VisionPriorityScheduler | None = None
         if vision is not None:
             self._scheduler = VisionPriorityScheduler(
@@ -95,6 +102,7 @@ class FocusService:
                 pass
             else:
                 await self._show_presentation(RobotPresentationState.IDLE)
+                await self.refresh_light()
 
     async def close(self) -> None:
         await self._cancel_background_tasks()
@@ -133,8 +141,13 @@ class FocusService:
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
             if self.robot is not None and self.vision is not None:
+                await self.refresh_light()
                 try:
-                    await self.robot.warmup_camera()
+                    await self._set_camera_light(True)
+                    try:
+                        await self.robot.warmup_camera()
+                    finally:
+                        await self._set_camera_light(False)
                 except Exception as error:
                     session.state = SessionState.FAILED
                     session.ended_at = datetime.now(UTC)
@@ -148,6 +161,7 @@ class FocusService:
                     self._emit(
                         session, "session.state_changed", {"state": session.state.value}
                     )
+                    await self.refresh_light()
                     await self._show_presentation(RobotPresentationState.ERROR)
                     return session, False
                 await self._enter_focus_presentation()
@@ -169,6 +183,7 @@ class FocusService:
             session.state = SessionState.FINALIZING
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self.refresh_light()
             await self._show_presentation(RobotPresentationState.ANALYZING)
             await self._stop_sampling()
             tail = self.batch_builder.flush_tail()
@@ -186,6 +201,7 @@ class FocusService:
             self.store.save_report(report)
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self.refresh_light()
             await self._show_presentation(RobotPresentationState.COMPLETED)
             self.store.cleanup_expired()
             return session
@@ -203,6 +219,7 @@ class FocusService:
             session.ended_at = datetime.now(UTC)
             self.store.save_session(session)
             self._emit(session, "session.state_changed", {"state": session.state.value})
+            await self.refresh_light()
             await self._show_presentation(RobotPresentationState.IDLE)
             return session
 
@@ -219,10 +236,49 @@ class FocusService:
         if self._scheduler is not None:
             await self._scheduler.set_voice_busy(busy)
         if not busy:
+            await self._set_voice_light(False)
             await self._restore_default_presentation()
 
     async def show_voice_state(self, state: RobotPresentationState) -> bool:
+        await self._set_voice_light(
+            state in {RobotPresentationState.LISTENING, RobotPresentationState.SPEAKING}
+        )
         return await self._show_presentation(state, voice_override=True)
+
+    async def refresh_light(self) -> bool:
+        """Apply camera > voice > focus > default light priority."""
+        if self.robot is None:
+            return False
+        if self._camera_light_depth > 0:
+            color = _LIGHT_CAMERA
+        elif self._voice_light_active:
+            color = _LIGHT_VOICE
+        elif self._active is not None and self._active.state in {
+            SessionState.RUNNING,
+            SessionState.FINALIZING,
+        }:
+            color = _LIGHT_FOCUS
+        else:
+            color = _LIGHT_DEFAULT
+        set_light = getattr(self.robot, "set_light", None)
+        if set_light is None:
+            return False
+        async with self._light_lock:
+            try:
+                return bool(await set_light(color, brightness=1.0))
+            except Exception:
+                return False
+
+    async def _set_voice_light(self, active: bool) -> None:
+        self._voice_light_active = active
+        await self.refresh_light()
+
+    async def _set_camera_light(self, active: bool) -> None:
+        if active:
+            self._camera_light_depth += 1
+        else:
+            self._camera_light_depth = max(0, self._camera_light_depth - 1)
+        await self.refresh_light()
 
     async def health(self) -> HealthResponse:
         components: dict[str, ComponentHealth] = {}
@@ -281,7 +337,13 @@ class FocusService:
                 / f"{session_id}_{sequence:04d}_{captured_at_ms}.jpg"
             )
             try:
-                frame = await self.robot.capture(destination, frame_id, sequence)  # type: ignore[union-attr]
+                await self._set_camera_light(True)
+                try:
+                    frame = await self.robot.capture(  # type: ignore[union-attr]
+                        destination, frame_id, sequence
+                    )
+                finally:
+                    await self._set_camera_light(False)
             except Exception as error:
                 session.failed_frames += 1
                 self._emit(
@@ -300,6 +362,7 @@ class FocusService:
                     self._emit(
                         session, "session.state_changed", {"state": session.state.value}
                     )
+                    await self.refresh_light()
                     await self._show_presentation(RobotPresentationState.ERROR)
                     break
             else:
@@ -345,9 +408,7 @@ class FocusService:
             "voice.turn_started",
             {"source": "session_timer", "intent": "auto_summary"},
         )
-        await self._show_presentation(
-            RobotPresentationState.SPEAKING, voice_override=True
-        )
+        await self.show_voice_state(RobotPresentationState.SPEAKING)
         try:
             await self.robot.play_pcm(self.tts.synthesize(reply))
         except Exception as error:
@@ -370,6 +431,7 @@ class FocusService:
                 "speech_to_first_audio_ms": first_audio_ms,
             },
         )
+        await self._set_voice_light(False)
         await self._restore_default_presentation()
 
     async def _stop_sampling(self) -> None:

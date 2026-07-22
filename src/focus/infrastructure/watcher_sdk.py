@@ -186,6 +186,24 @@ class WatcheRobotAdapter:
     async def stop_audio(self) -> None:
         await asyncio.to_thread(self._require_robot().audio.stop)
 
+    async def set_light(self, color: str, *, brightness: float = 1.0) -> bool:
+        """Set every robot light zone to one solid color."""
+        robot = self._require_robot()
+        supports = getattr(robot, "supports", None)
+        if callable(supports) and not supports("light"):
+            return False
+        try:
+            await asyncio.to_thread(
+                robot.lights.set_color,
+                color,
+                brightness=brightness,
+                zone="all",
+            )
+        except Exception as error:
+            logger.warning("Robot light %s could not be set: %s", color, error)
+            return False
+        return True
+
     async def play_animation(self, animation_id: str, *, restart: bool = False) -> bool:
         """Play one robot-installed animation without blocking the main pipeline.
 
