@@ -14,7 +14,7 @@ from .infrastructure.stepfun_vlm import StepFunVlmClient
 from .infrastructure.watcher_sdk import WatcheRobotAdapter
 from .service import FocusService
 from .settings import FocusSettings
-from .voice import VoiceController
+from .voice import EnergyVad, VoiceController
 
 
 class FocusRuntime:
@@ -72,6 +72,7 @@ class FocusRuntime:
                 asr=self.asr,
                 llm=self.llm,
                 tts=self.tts,
+                vad=EnergyVad(threshold=settings.focus_vad_threshold),
             )
         self.app = create_app(self.service)
         self._voice_task: asyncio.Task[None] | None = None
