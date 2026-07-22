@@ -20,6 +20,7 @@ CORRECTION_PROMPT = (
     "仅修复上一响应的 JSON 格式和 schema，不增加、删除或猜测观察结果。只返回 JSON。"
 )
 
+
 def response_schema_prompt(frame_ids: list[str]) -> str:
     frames = [
         {
@@ -28,14 +29,15 @@ def response_schema_prompt(frame_ids: list[str]) -> str:
             "phone": "visible|not_visible|uncertain",
             "cup": "visible|not_visible|uncertain",
             "cup_motion": "stable|changed|uncertain",
-            "confidence": 0.0,
+            "confidence": "按图估计",
             "evidence": "不超过6个中文字",
         }
         for frame_id in frame_ids
     ]
     skeleton = json.dumps({"frames": frames}, ensure_ascii=False, separators=(",", ":"))
     return (
-        "返回对象必须严格采用以下骨架；逐字保留其中的真实 frame_id、数量和顺序：\n"
+        "返回对象必须严格采用以下骨架；逐字保留其中的真实 frame_id、数量和顺序。"
+        "confidence 的占位文字必须替换为 0 到 1 的数值：\n"
         f"{skeleton}"
     )
 
@@ -46,6 +48,8 @@ def user_prompt(frame_ids: list[str], timestamps: list[datetime]) -> str:
     return (
         f"以下图片依次为 {ids}，拍摄时间依次为 {times}。\n"
         "逐帧观察，并比较相邻帧中的手机和杯子状态。\n"
+        "confidence 必须按该帧可见清晰度独立估计：清晰约 0.85，部分遮挡约 0.65，"
+        "只有整体无法判断时才低于 0.55。\n"
         "evidence 使用不超过 6 个中文字，只写可见证据。\n"
         f"{response_schema_prompt(frame_ids)}"
     )

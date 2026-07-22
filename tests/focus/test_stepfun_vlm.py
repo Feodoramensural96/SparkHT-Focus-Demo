@@ -77,6 +77,11 @@ async def test_multimage_contract_preserves_order_and_constraints(tmp_path) -> N
     assert schema["properties"]["frames"]["maxItems"] == 2
     assert prefix[0]["properties"]["evidence"]["maxLength"] == 6
     content = requests[0]["messages"][1]["content"]
+    prompt = content[0]["text"]
+    assert "清晰约 0.85" in prompt
+    assert "只有整体无法判断时才低于 0.55" in prompt
+    assert "confidence 的占位文字必须替换为 0 到 1 的数值" in prompt
+    assert '"confidence":"按图估计"' in prompt
     image_urls = [
         part["image_url"]["url"] for part in content if part["type"] == "image_url"
     ]
