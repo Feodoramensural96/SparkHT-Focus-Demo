@@ -23,7 +23,7 @@
 ## 2. 获取源码与创建环境
 
 ```bash
-git clone <repository-url> SparkHT-Focus
+git clone https://github.com/orulink-ai/SparkHT-Focus-Demo.git SparkHT-Focus
 cd SparkHT-Focus
 
 python3.12 -m venv .venv

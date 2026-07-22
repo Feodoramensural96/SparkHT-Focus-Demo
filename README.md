@@ -159,7 +159,7 @@ SparkHT/
 .venv/bin/pytest
 ```
 
-当前交付基线为 85 项自动测试。贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+当前交付基线为 87 项自动测试。贡献规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 真实链路基准：
 
