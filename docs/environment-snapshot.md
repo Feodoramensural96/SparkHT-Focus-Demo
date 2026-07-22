@@ -57,6 +57,7 @@
 
 ## WatcheRobot 真机链路
 
+- Python SDK 从 TestPyPI 官方 wheel 强制重装并精确锁定为 `watcherobot==0.1.0a4`；安装文件不是 editable，本项目 `pip check` 无依赖冲突。
 - Spark 同时拥有有线 `192.168.1.145/24` 和 Orulink Wi-Fi `192.168.1.130/24`；SDK 使用 `host=auto`，discovery 与 WebSocket 监听所有接口，首次配对成功。
 - 配对码只经隐藏标准输入进入进程环境，未写入 `.env`、systemd、日志或 Git。
 - 同一 SDK 对象依次取得麦克风首块、640×480 JPEG 并播放 PCM：0.386 秒、0.607 秒、1.895 秒。
