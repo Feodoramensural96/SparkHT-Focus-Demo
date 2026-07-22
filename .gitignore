@@ -12,3 +12,7 @@ build/
 dist/
 runtime/
 .env
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

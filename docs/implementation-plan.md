@@ -865,7 +865,7 @@ runtime/focus/{session_id}/
 
 ### 代码
 
-- [x] 78 项 `tests/focus` 测试通过。
+- [x] 80 项 `tests/focus` 测试通过。
 - [x] Ruff 格式和静态检查通过。
 - [x] 业务层只依赖 `ports.py`，没有直接耦合模型 SDK。
 - [x] 所有超时、队列长度和重试次数有明确上限。

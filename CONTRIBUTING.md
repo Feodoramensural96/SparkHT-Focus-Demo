@@ -6,7 +6,9 @@
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/pip install -e '.[test,model]'
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install --extra-index-url https://test.pypi.org/simple \
+  -e '.[test,model]'
 ```
 
 ## 提交前检查
@@ -65,3 +67,14 @@ build: 调整构建或依赖
 ```
 
 一次提交只表达一个意图。不要把模型权重、运行数据或无关工作区改动混入功能提交。
+
+## Issue 与 Pull Request
+
+- 提交 Issue 前先搜索是否已有相同问题，并提供操作系统、Python 版本、启动命令、脱敏日志和最小复现步骤。
+- 功能建议应说明使用场景、预期行为以及对机器人、GPU 或外部模型服务的新增要求。
+- Pull Request 应关联 Issue（如有），说明行为变化、验证命令和文档影响。
+- 不要上传真实会话图片、音频或配对码作为复现材料；请使用合成或完成匿名化的数据。
+- 维护者可能要求把过大的 Pull Request 拆分，以便独立审阅和回滚。
+
+参与本项目即表示同意遵守 [行为准则](CODE_OF_CONDUCT.md)。安全漏洞请按
+[安全政策](SECURITY.md)私下报告，不要创建公开 Issue。

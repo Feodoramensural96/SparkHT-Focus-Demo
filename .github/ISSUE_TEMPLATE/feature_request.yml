@@ -1,0 +1,42 @@
+name: 功能建议
+description: 建议一个符合项目边界的新能力
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 谁会在什么场景下使用它？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述预期行为，而不只是实现细节。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 当前有哪些绕过方式或其他设计？
+  - type: dropdown
+    id: hardware
+    attributes:
+      label: 是否增加硬件或模型依赖
+      options:
+        - 否
+        - 是，机器人能力
+        - 是，GPU 或模型服务
+        - 不确定
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 范围确认
+      options:
+        - label: 建议不要求接入 WatcheRobot_server。
+          required: true

@@ -200,9 +200,7 @@ async def test_light_uses_all_zones_at_full_brightness() -> None:
     await adapter.connect()
 
     assert await adapter.set_light("#FFFF00", brightness=1.0) is True
-    assert robot.light_calls == [
-        {"color": "#FFFF00", "brightness": 1.0, "zone": "all"}
-    ]
+    assert robot.light_calls == [{"color": "#FFFF00", "brightness": 1.0, "zone": "all"}]
 
     robot.light_supported = False
     assert await adapter.set_light("#FFFFFF") is False
