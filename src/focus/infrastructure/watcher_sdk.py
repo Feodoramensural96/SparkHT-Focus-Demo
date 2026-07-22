@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from focus.models import CapturedFrame
 
 
 MAX_SDK_AUDIO_STREAM_BYTES = 4 * 1024 * 1024
+PERSISTENT_BEHAVIOR_REPEAT = 255
+PERSISTENT_BEHAVIOR_IDS = frozenset({"standby2", "concentration"})
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +45,8 @@ class WatcheRobotAdapter:
         self._focus_entry_lock = asyncio.Lock()
         self._animation_id: str | None = None
         self._behavior_id: str | None = None
+        self._behavior_generation = 0
+        self._behavior_loop_task: asyncio.Task[None] | None = None
         self._microphone_session: Any | None = None
         self._microphone_pause_requested = asyncio.Event()
         self._microphone_paused = asyncio.Event()
@@ -58,6 +63,7 @@ class WatcheRobotAdapter:
         async with self._connect_lock:
             if self.connected:
                 return
+            await self._cancel_behavior_loop()
             stale, self._robot = self._robot, None
             if stale is not None:
                 try:
@@ -77,6 +83,7 @@ class WatcheRobotAdapter:
 
     async def close(self) -> None:
         self._microphone_resume.set()
+        await self._cancel_behavior_loop()
         robot, self._robot = self._robot, None
         self._animation_id = None
         self._behavior_id = None
@@ -234,6 +241,7 @@ class WatcheRobotAdapter:
                     error,
                 )
                 return False
+            await self._cancel_behavior_loop()
             self._animation_id = animation_id
             self._behavior_id = None
             return True
@@ -241,9 +249,9 @@ class WatcheRobotAdapter:
     async def play_behavior(self, behavior_id: str) -> bool:
         """Enter one firmware Behavior state.
 
-        Looping expressions such as ``standby2`` and ``concentration`` are kept
-        alive by the firmware's ``loop_until_replaced`` policy. This avoids a
-        finite GIF job ending and exposing the SDK Connected screen.
+        Stable expressions use a long device-side repeat and are renewed when
+        that job completes. Transient expressions remain one-shot behaviors.
+        Starting any other animation or behavior invalidates the renewal task.
         """
         async with self._focus_entry_lock:
             return await self._play_behavior(behavior_id)
@@ -256,10 +264,18 @@ class WatcheRobotAdapter:
             supports = getattr(robot, "supports", None)
             if callable(supports) and not supports("behavior"):
                 return False
-            if self._behavior_id == behavior_id:
+            persistent = behavior_id in PERSISTENT_BEHAVIOR_IDS
+            if self._behavior_id == behavior_id and (
+                not persistent
+                or self._behavior_loop_task is None
+                or (not self._behavior_loop_task.done())
+            ):
                 return True
+            repeat = PERSISTENT_BEHAVIOR_REPEAT if persistent else 1
             try:
-                await asyncio.to_thread(robot.behavior.play, behavior_id, repeat=1)
+                job = await asyncio.to_thread(
+                    robot.behavior.play, behavior_id, repeat=repeat
+                )
             except Exception as error:
                 logger.warning(
                     "Robot behavior %s could not be started: %s",
@@ -267,9 +283,78 @@ class WatcheRobotAdapter:
                     error,
                 )
                 return False
+            await self._cancel_behavior_loop()
             self._behavior_id = behavior_id
             self._animation_id = None
+            wait = getattr(job, "wait", None)
+            if persistent and callable(wait):
+                generation = self._behavior_generation
+                self._behavior_loop_task = asyncio.create_task(
+                    self._renew_behavior(behavior_id, generation, job),
+                    name=f"watcher-behavior-{behavior_id}",
+                )
             return True
+
+    async def _renew_behavior(
+        self, behavior_id: str, generation: int, job: Any
+    ) -> None:
+        """Renew a stable Behavior after its current device-side repeats end."""
+        current_task = asyncio.current_task()
+        try:
+            while True:
+                try:
+                    await asyncio.to_thread(job.wait, None)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.warning(
+                        "Robot behavior %s loop ended unexpectedly: %s",
+                        behavior_id,
+                        error,
+                    )
+                    if (
+                        generation == self._behavior_generation
+                        and self._behavior_id == behavior_id
+                    ):
+                        self._behavior_id = None
+                    return
+
+                async with self._focus_entry_lock:
+                    async with self._animation_lock:
+                        if (
+                            generation != self._behavior_generation
+                            or self._behavior_id != behavior_id
+                            or not self.connected
+                        ):
+                            return
+                        robot = self._require_robot()
+                        try:
+                            job = await asyncio.to_thread(
+                                robot.behavior.play,
+                                behavior_id,
+                                repeat=PERSISTENT_BEHAVIOR_REPEAT,
+                            )
+                        except Exception as error:
+                            logger.warning(
+                                "Robot behavior %s could not be renewed: %s",
+                                behavior_id,
+                                error,
+                            )
+                            self._behavior_id = None
+                            return
+        finally:
+            if self._behavior_loop_task is current_task:
+                self._behavior_loop_task = None
+
+    async def _cancel_behavior_loop(self) -> None:
+        """Invalidate and stop the current stable-Behavior renewal task."""
+        self._behavior_generation += 1
+        task, self._behavior_loop_task = self._behavior_loop_task, None
+        if task is None or task is asyncio.current_task() or task.done():
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     async def enter_focus_mode(self) -> bool:
         """Play the focus face, perform one nod, then hold the focus loop.

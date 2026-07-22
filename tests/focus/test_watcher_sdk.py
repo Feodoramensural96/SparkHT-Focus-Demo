@@ -5,7 +5,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from focus.infrastructure.watcher_sdk import WatcheRobotAdapter
+from focus.infrastructure.watcher_sdk import (
+    PERSISTENT_BEHAVIOR_REPEAT,
+    WatcheRobotAdapter,
+)
 
 
 class FakePlayback:
@@ -28,6 +31,16 @@ class FakeJob:
 
     def wait(self, timeout=None):
         self.wait_timeout = timeout
+        return self
+
+
+class ControlledJob:
+    def __init__(self) -> None:
+        self.completed = threading.Event()
+
+    def wait(self, timeout=None):
+        if not self.completed.wait(2.0):
+            raise TimeoutError("controlled job did not complete")
         return self
 
 
@@ -350,7 +363,7 @@ async def test_focus_entry_nods_once_then_enters_firmware_loop() -> None:
         },
     ]
     assert all(job.wait_timeout == 5.0 for job in robot.motion_jobs)
-    assert robot.behavior_ids == [("concentration", 1)]
+    assert robot.behavior_ids == [("concentration", PERSISTENT_BEHAVIOR_REPEAT)]
     await adapter.close()
 
 
@@ -367,8 +380,48 @@ async def test_looping_behavior_is_deduplicated_and_preempts_animation_cache() -
     assert await adapter.play_animation("speaking") is True
     assert await adapter.play_behavior("concentration") is True
 
-    assert robot.behavior_ids == [("concentration", 1), ("concentration", 1)]
+    assert robot.behavior_ids == [
+        ("concentration", PERSISTENT_BEHAVIOR_REPEAT),
+        ("concentration", PERSISTENT_BEHAVIOR_REPEAT),
+    ]
     assert robot.animation_ids == ["speaking"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_behavior_is_renewed_until_another_state_preempts_it() -> None:
+    robot = FakeRobot()
+    robot.behavior_jobs: list[ControlledJob] = []
+
+    class ControlledBehavior(robot.Behavior):
+        def play(self, behavior_id, *, repeat=1):
+            self.parent.behavior_ids.append((behavior_id, repeat))
+            job = ControlledJob()
+            self.parent.behavior_jobs.append(job)
+            return job
+
+    robot.behavior = ControlledBehavior(robot)
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    assert await adapter.play_behavior("standby2") is True
+    assert robot.behavior_ids == [("standby2", PERSISTENT_BEHAVIOR_REPEAT)]
+
+    robot.behavior_jobs[0].completed.set()
+    for _ in range(100):
+        if len(robot.behavior_ids) == 2:
+            break
+        await asyncio.sleep(0.001)
+
+    assert robot.behavior_ids == [
+        ("standby2", PERSISTENT_BEHAVIOR_REPEAT),
+        ("standby2", PERSISTENT_BEHAVIOR_REPEAT),
+    ]
+    assert await adapter.play_behavior("speaking") is True
+    robot.behavior_jobs[1].completed.set()
+    assert robot.behavior_ids[-1] == ("speaking", 1)
     await adapter.close()
 
 
@@ -408,5 +461,8 @@ async def test_transient_face_waits_for_atomic_focus_entry() -> None:
     release_motion.set()
     assert await entry is True
     assert await transient is True
-    assert robot.behavior_ids == [("concentration", 1), ("thinking", 1)]
+    assert robot.behavior_ids == [
+        ("concentration", PERSISTENT_BEHAVIOR_REPEAT),
+        ("thinking", 1),
+    ]
     await adapter.close()

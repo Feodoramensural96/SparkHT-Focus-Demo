@@ -15,6 +15,7 @@
 
 - 默认待机 Behavior 从呈现睡觉效果的 `standby` 调整为循环中立表情 `standby2`。
 - 思考等待阶段改用循环的 `standby2`，避免固件 `thinking` Behavior 结束后回退到睡觉版 `standby`。
+- `standby2` 与专注 Behavior 改为设备端长重复并由网关自动续播，避免单次播放结束后回到睡觉脸。
 
 ## [0.1.0] - 2026-07-22
 
