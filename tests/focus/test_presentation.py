@@ -19,7 +19,7 @@ def test_every_demo_state_maps_to_a_canonical_v3_1_animation() -> None:
 
 def test_core_focus_state_mapping_is_explicit() -> None:
     assert ANIMATION_ID_BY_STATE == {
-        RobotPresentationState.IDLE: "standby",
+        RobotPresentationState.IDLE: "standby2",
         RobotPresentationState.LISTENING: "listening",
         RobotPresentationState.THINKING: "thinking",
         RobotPresentationState.SPEAKING: "speaking",
@@ -81,7 +81,7 @@ async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) ->
     await service.set_voice_busy(False)
 
     assert robot.animation_ids == [
-        "standby",
+        "standby2",
         "concentration",
         "thinking",
         "concentration",

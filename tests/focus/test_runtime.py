@@ -69,7 +69,7 @@ async def test_runtime_hot_pairs_robot_and_starts_voice_supervisor(
     assert runtime.service.robot is robot
     assert runtime.voice is not None
     assert runtime._voice_task is not None
-    assert robot.behavior_ids == ["standby"]
+    assert robot.behavior_ids == ["standby2"]
     assert robot.light_colors == ["#FFFFFF"]
 
     repeated = await runtime.pair_robot("654321")

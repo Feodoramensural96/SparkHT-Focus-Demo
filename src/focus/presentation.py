@@ -17,7 +17,7 @@ class RobotPresentationState(str, Enum):
 
 
 ANIMATION_ID_BY_STATE: dict[RobotPresentationState, str] = {
-    RobotPresentationState.IDLE: "standby",
+    RobotPresentationState.IDLE: "standby2",
     RobotPresentationState.LISTENING: "listening",
     RobotPresentationState.THINKING: "thinking",
     RobotPresentationState.SPEAKING: "speaking",

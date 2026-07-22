@@ -241,7 +241,7 @@ class WatcheRobotAdapter:
     async def play_behavior(self, behavior_id: str) -> bool:
         """Enter one firmware Behavior state.
 
-        Looping expressions such as ``standby`` and ``concentration`` are kept
+        Looping expressions such as ``standby2`` and ``concentration`` are kept
         alive by the firmware's ``loop_until_replaced`` policy. This avoids a
         finite GIF job ending and exposing the SDK Connected screen.
         """
