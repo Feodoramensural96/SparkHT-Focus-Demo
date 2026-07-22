@@ -80,7 +80,19 @@ class VoiceController:
         if self.asr is None:
             return
         self._stopping = False
-        async for utterance in self.vad.utterances(self.robot.microphone_chunks()):
+        while not self._stopping:
+            # The firmware pauses microphone upload while speaker playback is active.
+            # Treat every utterance as a separate microphone lease: close it before
+            # ASR/TTS, then reopen it for the next turn after playback completes.
+            chunks = self.robot.microphone_chunks()
+            utterances = self.vad.utterances(chunks)
+            try:
+                utterance = await anext(utterances)
+            except StopAsyncIteration:
+                return
+            finally:
+                await utterances.aclose()
+                await chunks.aclose()
             if self._stopping:
                 break
             await self.service.set_voice_busy(True)
@@ -90,12 +102,14 @@ class VoiceController:
                     transcript = await self.asr.transcribe(utterance)
                 except Exception as error:
                     self.service.mark_degraded("asr", self._failure_reason(error))
-                    continue
-                await self._handle_transcript_while_busy(
-                    transcript, speech_ended_at=speech_ended_at
-                )
+                else:
+                    await self._handle_transcript_while_busy(
+                        transcript, speech_ended_at=speech_ended_at
+                    )
             finally:
                 await self.service.set_voice_busy(False)
+            if not self.robot.connected:
+                return
 
     async def stop(self) -> None:
         self._stopping = True

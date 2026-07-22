@@ -50,6 +50,7 @@ class FakeRobot:
     def __init__(self) -> None:
         self.spoken = b""
         self.last_playback_started_at = None
+        self.connected = False
 
     async def play_pcm(self, chunks):
         async for chunk in chunks:
@@ -83,6 +84,47 @@ class OneUtteranceVad:
         yield b"pcm"
 
 
+class StreamingVad:
+    async def utterances(self, chunks):
+        async for chunk in chunks:
+            yield chunk
+
+
+class SequencedAsr:
+    def __init__(self, transcripts):
+        self.transcripts = iter(transcripts)
+
+    async def transcribe(self, pcm):
+        return next(self.transcripts)
+
+
+class TwoTurnRobot(FakeRobot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.opens = 0
+        self.events: list[str] = []
+
+    @property
+    def connected(self):
+        return self.opens < 2
+
+    @connected.setter
+    def connected(self, value):
+        pass
+
+    async def microphone_chunks(self):
+        self.opens += 1
+        self.events.append(f"mic-{self.opens}-open")
+        try:
+            yield b"pcm"
+        finally:
+            self.events.append(f"mic-{self.opens}-closed")
+
+    async def play_pcm(self, chunks):
+        self.events.append(f"play-{self.opens}")
+        await super().play_pcm(chunks)
+
+
 @pytest.mark.asyncio
 async def test_deterministic_start_status_stop_and_voice_priority() -> None:
     service = FakeFocusService()
@@ -94,7 +136,9 @@ async def test_deterministic_start_status_stop_and_voice_priority() -> None:
     assert "4 帧" in await controller.handle_transcript("统计到哪了")
     assert "专注趋势 88 分" in await controller.handle_transcript("结束专注并生成总结")
     assert service.busy == [True, False, True, False, True, False]
-    completed = [data for event, data in service.events if event == "voice.turn_completed"]
+    completed = [
+        data for event, data in service.events if event == "voice.turn_completed"
+    ]
     assert all(item["speech_to_first_audio_ms"] >= 0 for item in completed)
 
 
@@ -127,3 +171,30 @@ async def test_asr_failure_does_not_kill_voice_controller() -> None:
 
     assert service.busy == [True, False]
     assert service.degraded == [("asr", "RuntimeError: asr offline")]
+
+
+@pytest.mark.asyncio
+async def test_microphone_is_closed_for_tts_and_reopened_for_next_turn() -> None:
+    service = FakeFocusService()
+    robot = TwoTurnRobot()
+    controller = VoiceController(
+        service=service,
+        robot=robot,
+        asr=SequencedAsr(["开始统计", "统计到哪了"]),
+        llm=None,
+        tts=FakeTts(),
+        vad=StreamingVad(),
+    )
+
+    await controller.run()
+
+    assert robot.opens == 2
+    assert robot.events == [
+        "mic-1-open",
+        "mic-1-closed",
+        "play-1",
+        "mic-2-open",
+        "mic-2-closed",
+        "play-2",
+    ]
+    assert service.busy == [True, False, True, False]
