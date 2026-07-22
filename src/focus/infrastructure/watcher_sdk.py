@@ -16,7 +16,8 @@ from focus.models import CapturedFrame
 
 
 MAX_SDK_AUDIO_STREAM_BYTES = 4 * 1024 * 1024
-PERSISTENT_BEHAVIOR_REPEAT = 255
+PERSISTENT_BEHAVIOR_REPEAT = 1
+PERSISTENT_BEHAVIOR_REFRESH_SECONDS = 1.0
 PERSISTENT_BEHAVIOR_IDS = frozenset({"standby2", "concentration"})
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,17 @@ class WatcheRobotAdapter:
         websocket_port: int = 8766,
         host: str = "auto",
         robot_factory: Callable[..., Any] = WatcheRobot.connect,
+        persistent_behavior_refresh_seconds: float = (
+            PERSISTENT_BEHAVIOR_REFRESH_SECONDS
+        ),
     ) -> None:
         self._pairing_code = pairing_code
         self.discovery_port = discovery_port
         self.websocket_port = websocket_port
         self.host = host
+        if persistent_behavior_refresh_seconds <= 0:
+            raise ValueError("persistent_behavior_refresh_seconds must be positive")
+        self._persistent_behavior_refresh_seconds = persistent_behavior_refresh_seconds
         self._factory = robot_factory
         self._robot: Any | None = None
         self._connect_lock = asyncio.Lock()
@@ -249,9 +256,9 @@ class WatcheRobotAdapter:
     async def play_behavior(self, behavior_id: str) -> bool:
         """Enter one firmware Behavior state.
 
-        Stable expressions use a long device-side repeat and are renewed when
-        that job completes. Transient expressions remain one-shot behaviors.
-        Starting any other animation or behavior invalidates the renewal task.
+        Stable expressions are actively reasserted by the gateway because the
+        current firmware can cancel or visually end a Behavior even when its
+        repeat count is greater than one. Transient expressions remain one-shot.
         """
         async with self._focus_entry_lock:
             return await self._play_behavior(behavior_id)
@@ -273,9 +280,7 @@ class WatcheRobotAdapter:
                 return True
             repeat = PERSISTENT_BEHAVIOR_REPEAT if persistent else 1
             try:
-                job = await asyncio.to_thread(
-                    robot.behavior.play, behavior_id, repeat=repeat
-                )
+                await asyncio.to_thread(robot.behavior.play, behavior_id, repeat=repeat)
             except Exception as error:
                 logger.warning(
                     "Robot behavior %s could not be started: %s",
@@ -286,39 +291,20 @@ class WatcheRobotAdapter:
             await self._cancel_behavior_loop()
             self._behavior_id = behavior_id
             self._animation_id = None
-            wait = getattr(job, "wait", None)
-            if persistent and callable(wait):
+            if persistent:
                 generation = self._behavior_generation
                 self._behavior_loop_task = asyncio.create_task(
-                    self._renew_behavior(behavior_id, generation, job),
+                    self._maintain_behavior(behavior_id, generation),
                     name=f"watcher-behavior-{behavior_id}",
                 )
             return True
 
-    async def _renew_behavior(
-        self, behavior_id: str, generation: int, job: Any
-    ) -> None:
-        """Renew a stable Behavior after its current device-side repeats end."""
+    async def _maintain_behavior(self, behavior_id: str, generation: int) -> None:
+        """Periodically reassert a stable face until another state preempts it."""
         current_task = asyncio.current_task()
         try:
             while True:
-                try:
-                    await asyncio.to_thread(job.wait, None)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as error:
-                    logger.warning(
-                        "Robot behavior %s loop ended unexpectedly: %s",
-                        behavior_id,
-                        error,
-                    )
-                    if (
-                        generation == self._behavior_generation
-                        and self._behavior_id == behavior_id
-                    ):
-                        self._behavior_id = None
-                    return
-
+                await asyncio.sleep(self._persistent_behavior_refresh_seconds)
                 async with self._focus_entry_lock:
                     async with self._animation_lock:
                         if (
@@ -329,7 +315,7 @@ class WatcheRobotAdapter:
                             return
                         robot = self._require_robot()
                         try:
-                            job = await asyncio.to_thread(
+                            await asyncio.to_thread(
                                 robot.behavior.play,
                                 behavior_id,
                                 repeat=PERSISTENT_BEHAVIOR_REPEAT,
