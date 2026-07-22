@@ -4,7 +4,7 @@ import math
 import sys
 import time
 from array import array
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from .intent import FocusIntent, match_focus_intent, normalize_zh_text
 from .models import FocusSessionCreate, SessionState
@@ -26,6 +26,7 @@ class EnergyVad:
         self.silence_chunks = silence_chunks
         self.min_voice_chunks = min_voice_chunks
         self.max_chunks = max_chunks
+        self.on_voice_started: Callable[[], Awaitable[None]] | None = None
 
     async def utterances(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
         buffered: list[bytes] = []
@@ -34,6 +35,8 @@ class EnergyVad:
         async for chunk in chunks:
             level = self._rms(chunk)
             if level >= self.threshold:
+                if voiced == 0 and self.on_voice_started is not None:
+                    await self.on_voice_started()
                 voiced += 1
                 silence = 0
                 buffered.append(chunk)
@@ -75,6 +78,10 @@ class VoiceController:
         self.llm = llm
         self.tts = tts
         self.vad = vad or EnergyVad()
+        if isinstance(self.vad, EnergyVad):
+            self.vad.on_voice_started = lambda: self._show_voice_state(
+                RobotPresentationState.LISTENING
+            )
         self._stopping = False
 
     async def run(self) -> None:
@@ -85,7 +92,6 @@ class VoiceController:
             # The firmware pauses microphone upload while speaker playback is active.
             # Treat every utterance as a separate microphone lease: close it before
             # ASR/TTS, then reopen it for the next turn after playback completes.
-            await self._show_voice_state(RobotPresentationState.LISTENING)
             chunks = self.robot.microphone_chunks()
             utterances = self.vad.utterances(chunks)
             try:

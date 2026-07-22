@@ -5,7 +5,7 @@ import pytest
 
 from focus.models import FocusMode, FocusSession, FocusStats, SessionState
 from focus.presentation import RobotPresentationState
-from focus.voice import VoiceController
+from focus.voice import EnergyVad, VoiceController
 
 
 class FakeFocusService:
@@ -121,6 +121,26 @@ class StreamingVad:
     async def utterances(self, chunks):
         async for chunk in chunks:
             yield chunk
+
+
+@pytest.mark.asyncio
+async def test_energy_vad_announces_listening_only_when_voice_starts() -> None:
+    vad = EnergyVad(threshold=100, silence_chunks=1, min_voice_chunks=1)
+    states: list[str] = []
+
+    async def voice_started() -> None:
+        states.append("listening")
+
+    async def chunks():
+        yield b"\x00\x00" * 20
+        yield b"\xe8\x03" * 20
+        yield b"\x00\x00" * 20
+
+    vad.on_voice_started = voice_started
+    utterances = [utterance async for utterance in vad.utterances(chunks())]
+
+    assert states == ["listening"]
+    assert len(utterances) == 1
 
 
 class SequencedAsr:

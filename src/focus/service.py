@@ -219,7 +219,7 @@ class FocusService:
         if self._scheduler is not None:
             await self._scheduler.set_voice_busy(busy)
         if not busy:
-            await self._restore_presentation()
+            await self._restore_default_presentation()
 
     async def show_voice_state(self, state: RobotPresentationState) -> bool:
         return await self._show_presentation(state, voice_override=True)
@@ -370,7 +370,7 @@ class FocusService:
                 "speech_to_first_audio_ms": first_audio_ms,
             },
         )
-        await self._show_presentation(RobotPresentationState.COMPLETED)
+        await self._restore_default_presentation()
 
     async def _stop_sampling(self) -> None:
         current = asyncio.current_task()
@@ -411,7 +411,7 @@ class FocusService:
                 },
             )
             self._emit(session, "stats.updated", session.stats.model_dump(mode="json"))
-            await self._show_presentation(RobotPresentationState.FOCUSING)
+            await self._restore_default_presentation()
         else:
             session.failed_frames += len(analysis.observations) or 1
             reason = analysis.error or "analysis_failed"
@@ -444,7 +444,7 @@ class FocusService:
 
     async def _analysis_paused(self, frames: list) -> None:
         if self._active is not None:
-            await self._show_presentation(RobotPresentationState.FOCUSING)
+            await self._restore_default_presentation()
             self._emit(
                 self._active,
                 "vision.batch_paused",
@@ -481,17 +481,14 @@ class FocusService:
         except Exception:
             return False
 
-    async def _restore_presentation(self) -> bool:
-        session = self._active
-        if session is None or session.state is SessionState.CANCELLED:
-            state = RobotPresentationState.IDLE
-        elif session.state in {SessionState.RUNNING, SessionState.FINALIZING}:
-            state = RobotPresentationState.FOCUSING
-        elif session.state is SessionState.COMPLETED:
-            state = RobotPresentationState.COMPLETED
-        else:
-            state = RobotPresentationState.ERROR
-        return await self._show_presentation(state)
+    async def _restore_default_presentation(self) -> bool:
+        """Return to one stable face instead of replaying the session state.
+
+        The robot-side SDK Control App owns connection status. Reconstructing a
+        session-derived face here and then immediately entering another voice or
+        vision state causes visible back-and-forth switching.
+        """
+        return await self._show_presentation(RobotPresentationState.IDLE)
 
     def _build_report(self, session: FocusSession) -> FocusReport:
         stats = session.stats

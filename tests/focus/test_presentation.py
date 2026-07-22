@@ -47,7 +47,7 @@ class AnimationRobot:
 
 
 @pytest.mark.asyncio
-async def test_voice_animation_preempts_vision_and_restores_focus(tmp_path) -> None:
+async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) -> None:
     robot = AnimationRobot()
     service = FocusService(
         store=FileSessionStore(tmp_path), robot=robot, vision=None
@@ -70,6 +70,6 @@ async def test_voice_animation_preempts_vision_and_restores_focus(tmp_path) -> N
         "standby",
         "concentration",
         "thinking",
-        "concentration",
+        "standby",
     ]
     await service.close()
