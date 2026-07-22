@@ -41,8 +41,11 @@ class FocusService:
         normal_duration_seconds: int = 1_500,
         batch_size: int = 4,
         voice_idle_seconds: float = 5.0,
+        max_frames_per_session: int = 100,
         events: EventHub | None = None,
     ) -> None:
+        if max_frames_per_session < 1:
+            raise ValueError("max_frames_per_session must be positive")
         self.store = store
         self.robot = robot
         self.vision = vision
@@ -53,6 +56,7 @@ class FocusService:
         self.normal_capture_interval = normal_capture_interval
         self.demo_duration_seconds = demo_duration_seconds
         self.normal_duration_seconds = normal_duration_seconds
+        self.max_frames_per_session = max_frames_per_session
         self.batch_builder = BatchBuilder(batch_size=batch_size)
         self.events = events or EventHub(max_events=200)
         self._lock = asyncio.Lock()
@@ -244,7 +248,10 @@ class FocusService:
             if session.mode is FocusMode.DEMO
             else self.normal_capture_interval
         )
-        while session.state is SessionState.RUNNING:
+        while (
+            session.state is SessionState.RUNNING
+            and session.captured_frames < self.max_frames_per_session
+        ):
             sequence += 1
             captured_at_ms = int(datetime.now(UTC).timestamp() * 1000)
             frame_id = f"{session_id}_f-{sequence:04d}"
@@ -298,13 +305,7 @@ class FocusService:
         if self.robot is None:
             return
         if self.tts is None:
-            session.degraded_components["tts"] = "auto_summary_not_configured"
-            self.store.save_session(session)
-            self._emit(
-                session,
-                "service.degraded",
-                {"component": "tts", "reason": "auto_summary_not_configured"},
-            )
+            self.mark_degraded("tts", "auto_summary_not_configured")
             return
 
         report = self.get_report(session.session_id)
@@ -326,13 +327,7 @@ class FocusService:
             await self.robot.play_pcm(self.tts.synthesize(reply))
         except Exception as error:
             reason = f"auto_summary_failed: {str(error)[:160]}"
-            session.degraded_components["tts"] = reason
-            self.store.save_session(session)
-            self._emit(
-                session,
-                "service.degraded",
-                {"component": "tts", "reason": reason},
-            )
+            self.mark_degraded("tts", reason)
             return
 
         playback_started_at = self.robot.last_playback_started_at
@@ -392,10 +387,21 @@ class FocusService:
             self._emit(session, "stats.updated", session.stats.model_dump(mode="json"))
         else:
             session.failed_frames += len(analysis.observations) or 1
+            reason = analysis.error or "analysis_failed"
+            session.degraded_components["stepfun_vlm"] = reason[:200]
             self._emit(
                 session,
                 "vision.batch_failed",
-                {"batch_id": analysis.batch_id, "error": analysis.error},
+                {
+                    "batch_id": analysis.batch_id,
+                    "status": analysis.status,
+                    "error": analysis.error,
+                },
+            )
+            self._emit(
+                session,
+                "service.degraded",
+                {"component": "stepfun_vlm", "reason": reason[:200]},
             )
         self.store.save_session(session)
 
@@ -419,6 +425,14 @@ class FocusService:
         if self._active is not None:
             self._active.dropped_batches += 1
             self.store.save_session(self._active)
+            self._emit(
+                self._active,
+                "vision.batch_failed",
+                {
+                    "status": "dropped_as_stale",
+                    "frame_ids": [frame.frame_id for frame in frames],
+                },
+            )
 
     def _build_report(self, session: FocusSession) -> FocusReport:
         stats = session.stats
@@ -461,3 +475,15 @@ class FocusService:
     def emit_voice_event(self, event_type: str, data: dict) -> None:
         if self._active is not None:
             self._emit(self._active, event_type, data)
+
+    def mark_degraded(self, component: str, reason: str) -> None:
+        if self._active is None:
+            return
+        safe_reason = reason[:200]
+        self._active.degraded_components[component] = safe_reason
+        self.store.save_session(self._active)
+        self._emit(
+            self._active,
+            "service.degraded",
+            {"component": component, "reason": safe_reason},
+        )

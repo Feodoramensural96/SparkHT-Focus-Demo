@@ -62,6 +62,7 @@ class FocusRuntime:
             normal_duration_seconds=settings.focus_normal_duration_seconds,
             batch_size=settings.focus_batch_size,
             voice_idle_seconds=settings.focus_voice_idle_seconds,
+            max_frames_per_session=settings.focus_max_frames_per_session,
         )
         self.voice = None
         if self.robot is not None:

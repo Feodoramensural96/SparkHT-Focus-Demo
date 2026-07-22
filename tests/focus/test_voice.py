@@ -11,6 +11,7 @@ class FakeFocusService:
     def __init__(self) -> None:
         self.busy: list[bool] = []
         self.events: list[tuple[str, dict]] = []
+        self.degraded: list[tuple[str, str]] = []
         self.session = FocusSession(
             session_id="fs_test",
             mode=FocusMode.DEMO,
@@ -41,6 +42,9 @@ class FakeFocusService:
     def emit_voice_event(self, event_type, data):
         self.events.append((event_type, data))
 
+    def mark_degraded(self, component, reason):
+        self.degraded.append((component, reason))
+
 
 class FakeRobot:
     def __init__(self) -> None:
@@ -53,10 +57,30 @@ class FakeRobot:
                 self.last_playback_started_at = time.monotonic()
             self.spoken += chunk
 
+    async def microphone_chunks(self):
+        if False:
+            yield b""
+
 
 class FakeTts:
     async def synthesize(self, text):
         yield text.encode()
+
+
+class BrokenTts:
+    async def synthesize(self, text):
+        raise RuntimeError("tts offline")
+        yield b""  # pragma: no cover
+
+
+class BrokenAsr:
+    async def transcribe(self, pcm):
+        raise RuntimeError("asr offline")
+
+
+class OneUtteranceVad:
+    async def utterances(self, chunks):
+        yield b"pcm"
 
 
 @pytest.mark.asyncio
@@ -72,3 +96,34 @@ async def test_deterministic_start_status_stop_and_voice_priority() -> None:
     assert service.busy == [True, False, True, False, True, False]
     completed = [data for event, data in service.events if event == "voice.turn_completed"]
     assert all(item["speech_to_first_audio_ms"] >= 0 for item in completed)
+
+
+@pytest.mark.asyncio
+async def test_tts_failure_returns_text_and_records_degradation() -> None:
+    service = FakeFocusService()
+    controller = VoiceController(
+        service=service, robot=FakeRobot(), asr=None, llm=None, tts=BrokenTts()
+    )
+
+    reply = await controller.handle_transcript("统计到哪了")
+
+    assert "4 帧" in reply
+    assert service.degraded == [("tts", "RuntimeError: tts offline")]
+
+
+@pytest.mark.asyncio
+async def test_asr_failure_does_not_kill_voice_controller() -> None:
+    service = FakeFocusService()
+    controller = VoiceController(
+        service=service,
+        robot=FakeRobot(),
+        asr=BrokenAsr(),
+        llm=None,
+        tts=None,
+        vad=OneUtteranceVad(),
+    )
+
+    await controller.run()
+
+    assert service.busy == [True, False]
+    assert service.degraded == [("asr", "RuntimeError: asr offline")]

@@ -167,3 +167,85 @@ async def test_duration_timer_speaks_exactly_one_completed_summary(tmp_path) -> 
     assert len(summaries) == 1
     assert summaries[0]["data"]["source"] == "session_timer"
     assert summaries[0]["data"]["speech_to_first_audio_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_capture_loop_never_retains_more_than_configured_limit(tmp_path) -> None:
+    robot = FakeRobot()
+    service = FocusService(
+        store=FileSessionStore(tmp_path),
+        robot=robot,
+        vision=FakeVision(),
+        demo_capture_interval=0.001,
+        max_frames_per_session=3,
+    )
+    await service.start()
+    try:
+        session, _ = await service.create_session(
+            FocusSessionCreate(duration_seconds=10)
+        )
+        await asyncio.sleep(0.03)
+        assert service.get_session(session.session_id).captured_frames == 3
+        assert len(list(service.store.frame_dir(session.session_id).glob("*.jpg"))) == 3
+        await service.cancel_session(session.session_id)
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_stale_batch_drop_is_persisted_and_visible_as_event(tmp_path) -> None:
+    service = FocusService(store=FileSessionStore(tmp_path), robot=None, vision=None)
+    session, _ = await service.create_session(FocusSessionCreate())
+    frame = CapturedFrame(
+        frame_id="stale-frame",
+        captured_at=datetime.now(UTC),
+        path=tmp_path / "stale.jpg",
+        sequence=1,
+        latency_ms=1,
+    )
+
+    await service._analysis_dropped([frame])
+
+    assert service.get_session(session.session_id).dropped_batches == 1
+    events = [
+        json.loads(line)
+        for line in (tmp_path / session.session_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert events[-1]["type"] == "vision.batch_failed"
+    assert events[-1]["data"] == {
+        "status": "dropped_as_stale",
+        "frame_ids": ["stale-frame"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_failed_visual_batch_degrades_only_slow_system(tmp_path) -> None:
+    service = FocusService(store=FileSessionStore(tmp_path), robot=None, vision=None)
+    session, _ = await service.create_session(FocusSessionCreate())
+    failed = BatchAnalysis(
+        batch_id="failed-batch",
+        observations=[],
+        model_name="step3-vl-focus",
+        latency_ms=30_000,
+        status="analysis_failed",
+        error="request timeout",
+    )
+
+    await service._analysis_completed(failed)
+
+    saved = service.get_session(session.session_id)
+    assert saved.state.value == "running"
+    assert saved.failed_frames == 1
+    assert saved.degraded_components["stepfun_vlm"] == "request timeout"
+    events = [
+        json.loads(line)
+        for line in (tmp_path / session.session_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [event["type"] for event in events[-2:]] == [
+        "vision.batch_failed",
+        "service.degraded",
+    ]

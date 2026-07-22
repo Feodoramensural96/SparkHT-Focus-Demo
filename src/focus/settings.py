@@ -30,6 +30,7 @@ class FocusSettings(BaseSettings):
     focus_normal_capture_interval_seconds: float = 30.0
     focus_batch_size: int = 4
     focus_voice_idle_seconds: float = 5.0
+    focus_max_frames_per_session: int = 100
 
     stepfun_vlm_base_url: str = "http://127.0.0.1:8040/v1"
     stepfun_vlm_model: str = "step3-vl-focus"

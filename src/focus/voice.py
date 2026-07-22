@@ -86,7 +86,11 @@ class VoiceController:
             await self.service.set_voice_busy(True)
             try:
                 speech_ended_at = time.monotonic()
-                transcript = await self.asr.transcribe(utterance)
+                try:
+                    transcript = await self.asr.transcribe(utterance)
+                except Exception as error:
+                    self.service.mark_degraded("asr", self._failure_reason(error))
+                    continue
                 await self._handle_transcript_while_busy(
                     transcript, speech_ended_at=speech_ended_at
                 )
@@ -159,7 +163,8 @@ class VoiceController:
         elif self.llm is not None:
             try:
                 reply = await self.llm.reply(transcript, max_chinese_chars=60)
-            except Exception:
+            except Exception as error:
+                self.service.mark_degraded("ollama", self._failure_reason(error))
                 reply = "我听到了，但当前对话服务暂时不可用。"
         else:
             reply = "我听到了。专注统计命令仍然可以正常使用。"
@@ -175,8 +180,8 @@ class VoiceController:
                     speech_to_first_audio_ms = round(
                         (playback_started_at - speech_ended_at) * 1000
                     )
-            except Exception:
-                pass
+            except Exception as error:
+                self.service.mark_degraded("tts", self._failure_reason(error))
         if emit is not None:
             emit(
                 "voice.turn_completed",
@@ -187,3 +192,7 @@ class VoiceController:
                 },
             )
         return reply
+
+    @staticmethod
+    def _failure_reason(error: Exception) -> str:
+        return f"{type(error).__name__}: {str(error)[:160]}"
