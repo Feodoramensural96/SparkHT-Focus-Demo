@@ -310,7 +310,9 @@ async def test_deterministic_start_status_stop_and_voice_priority() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_after_completed_session_emits_both_directions_to_new_session() -> None:
+async def test_start_after_completed_session_emits_both_directions_to_new_session() -> (
+    None
+):
     service = SessionAwareFocusService()
     controller = VoiceController(
         service=service, robot=FakeRobot(), asr=None, llm=None, tts=FakeTts()

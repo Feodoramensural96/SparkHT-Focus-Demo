@@ -54,7 +54,9 @@ class FileSessionStore:
         ]
         if not sessions:
             raise FileNotFoundError("no persisted session")
-        observed = [session for session in sessions if session.stats.analyzed_frames > 0]
+        observed = [
+            session for session in sessions if session.stats.analyzed_frames > 0
+        ]
         return max(observed or sessions, key=lambda session: session.created_at)
 
     def append_event(self, event: FocusEvent) -> None:

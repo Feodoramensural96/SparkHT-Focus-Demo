@@ -186,9 +186,7 @@ class WatcheRobotAdapter:
     async def stop_audio(self) -> None:
         await asyncio.to_thread(self._require_robot().audio.stop)
 
-    async def play_animation(
-        self, animation_id: str, *, restart: bool = False
-    ) -> bool:
+    async def play_animation(self, animation_id: str, *, restart: bool = False) -> bool:
         """Play one robot-installed animation without blocking the main pipeline.
 
         Starting another animation in firmware preempts the previous animation

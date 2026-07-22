@@ -60,9 +60,7 @@ class FocusEntryRobot(AnimationRobot):
 @pytest.mark.asyncio
 async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) -> None:
     robot = AnimationRobot()
-    service = FocusService(
-        store=FileSessionStore(tmp_path), robot=robot, vision=None
-    )
+    service = FocusService(store=FileSessionStore(tmp_path), robot=robot, vision=None)
     await service.start()
     service._active = FocusSession(
         session_id="fs_animation",
@@ -91,9 +89,7 @@ async def test_voice_during_finalization_restores_processing_not_standby(
     tmp_path,
 ) -> None:
     robot = AnimationRobot()
-    service = FocusService(
-        store=FileSessionStore(tmp_path), robot=robot, vision=None
-    )
+    service = FocusService(store=FileSessionStore(tmp_path), robot=robot, vision=None)
     service._active = FocusSession(
         session_id="fs_finalizing_animation",
         mode=FocusMode.DEMO,
@@ -109,7 +105,9 @@ async def test_voice_during_finalization_restores_processing_not_standby(
 
 
 @pytest.mark.asyncio
-async def test_session_start_runs_focus_entry_even_during_voice_override(tmp_path) -> None:
+async def test_session_start_runs_focus_entry_even_during_voice_override(
+    tmp_path,
+) -> None:
     robot = FocusEntryRobot()
 
     class CameraVision:

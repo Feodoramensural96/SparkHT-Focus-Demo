@@ -59,7 +59,9 @@ def create_app(service: FocusService) -> FastAPI:
         try:
             return service.store.latest_session().model_dump(mode="json")
         except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="no persisted session") from None
+            raise HTTPException(
+                status_code=404, detail="no persisted session"
+            ) from None
 
     @app.get("/api/focus/sessions/{session_id}")
     async def get_session(session_id: str) -> dict:
@@ -98,7 +100,9 @@ def create_app(service: FocusService) -> FastAPI:
                 for event in service.store.load_events(session_id, limit=200)
             ]
         except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="event history not found") from None
+            raise HTTPException(
+                status_code=404, detail="event history not found"
+            ) from None
 
     @app.get("/api/focus/sessions/{session_id}/frames/latest")
     async def latest_frame(session_id: str) -> FileResponse:

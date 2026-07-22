@@ -161,7 +161,9 @@ async def test_sdk_warmup_failure_marks_session_failed(tmp_path) -> None:
     assert session.state is SessionState.FAILED
     assert session.degraded_components["watcher_sdk"] == "camera unavailable"
     assert (await service.stop_session(session.session_id)).state is SessionState.FAILED
-    assert (await service.cancel_session(session.session_id)).state is SessionState.FAILED
+    assert (
+        await service.cancel_session(session.session_id)
+    ).state is SessionState.FAILED
 
 
 @pytest.mark.asyncio
