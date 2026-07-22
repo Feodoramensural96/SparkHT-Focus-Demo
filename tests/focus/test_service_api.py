@@ -17,12 +17,16 @@ def make_client(tmp_path: Path) -> tuple[TestClient, FocusService]:
 
 def test_create_reuses_active_session_and_stop_is_idempotent(tmp_path) -> None:
     client, _ = make_client(tmp_path)
+    assert client.get("/api/focus/active").status_code == 404
     first = client.post(
         "/api/focus/sessions", json={"mode": "demo", "duration_seconds": 90}
     )
     assert first.status_code == 201
     session_id = first.json()["session_id"]
     assert first.json()["state"] == "running"
+    active = client.get("/api/focus/active")
+    assert active.status_code == 200
+    assert active.json()["session_id"] == session_id
 
     duplicate = client.post("/api/focus/sessions", json={"mode": "demo"})
     assert duplicate.status_code == 200
@@ -69,6 +73,8 @@ def test_dashboard_contains_four_regions_and_real_model_name(tmp_path) -> None:
     assert response.status_code == 200
     for text in ("最新画面", "核心指标", "时间线", "技术状态", "Step3-VL-10B-FP8"):
         assert text in response.text
+    assert "fetch('/api/focus/active')" in response.text
+    assert "最近 Step3 批次" in response.text
     for element_id in (
         "frame",
         "presence",
