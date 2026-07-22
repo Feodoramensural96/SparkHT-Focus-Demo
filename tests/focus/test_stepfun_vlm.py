@@ -67,6 +67,15 @@ async def test_multimage_contract_preserves_order_and_constraints(tmp_path) -> N
     assert requests[0]["temperature"] == 0
     assert requests[0]["max_tokens"] == 192
     assert requests[0]["model"] == "step3-vl-focus"
+    schema = requests[0]["response_format"]["json_schema"]["schema"]
+    prefix = schema["properties"]["frames"]["prefixItems"]
+    assert [item["properties"]["frame_id"]["const"] for item in prefix] == [
+        "f-0",
+        "f-1",
+    ]
+    assert schema["properties"]["frames"]["minItems"] == 2
+    assert schema["properties"]["frames"]["maxItems"] == 2
+    assert prefix[0]["properties"]["evidence"]["maxLength"] == 12
     content = requests[0]["messages"][1]["content"]
     image_urls = [
         part["image_url"]["url"] for part in content if part["type"] == "image_url"

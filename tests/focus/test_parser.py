@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from focus.prompts import parse_stepfun_response
+from focus.prompts import parse_stepfun_response, user_prompt
 
 
 TIMES = {
@@ -23,6 +23,13 @@ def test_parse_valid_json() -> None:
     parsed = parse_stepfun_response(VALID, list(TIMES), TIMES)
     assert [item.frame_id for item in parsed] == ["f-001", "f-002"]
     assert parsed[1].captured_at == TIMES["f-002"]
+
+
+def test_user_prompt_embeds_exact_frame_ids_in_output_skeleton() -> None:
+    prompt = user_prompt(list(TIMES), list(TIMES.values()))
+    assert '"frame_id":"f-001"' in prompt
+    assert '"frame_id":"f-002"' in prompt
+    assert prompt.index('"frame_id":"f-001"') < prompt.index('"frame_id":"f-002"')
 
 
 def test_extract_json_from_markdown_fence() -> None:

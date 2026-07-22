@@ -59,6 +59,7 @@ class StepFunVlmClient:
                         "messages": request_messages,
                         "temperature": 0,
                         "max_tokens": self.max_tokens,
+                        "response_format": self._response_format(frames),
                     },
                     timeout=remaining,
                 )
@@ -125,3 +126,59 @@ class StepFunVlmClient:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": content},
         ]
+
+    @staticmethod
+    def _response_format(frames: list[CapturedFrame]) -> dict:
+        def observation(frame_id: str) -> dict:
+            return {
+                "type": "object",
+                "properties": {
+                    "frame_id": {"const": frame_id},
+                    "person": {
+                        "type": "string",
+                        "enum": ["present", "absent", "uncertain"],
+                    },
+                    "phone": {
+                        "type": "string",
+                        "enum": ["visible", "not_visible", "uncertain"],
+                    },
+                    "cup": {
+                        "type": "string",
+                        "enum": ["visible", "not_visible", "uncertain"],
+                    },
+                    "cup_motion": {
+                        "type": "string",
+                        "enum": ["stable", "changed", "uncertain"],
+                    },
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "evidence": {"type": "string", "maxLength": 12},
+                },
+                "required": [
+                    "frame_id",
+                    "person",
+                    "phone",
+                    "cup",
+                    "cup_motion",
+                    "confidence",
+                    "evidence",
+                ],
+                "additionalProperties": False,
+            }
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "frames": {
+                    "type": "array",
+                    "prefixItems": [observation(frame.frame_id) for frame in frames],
+                    "minItems": len(frames),
+                    "maxItems": len(frames),
+                }
+            },
+            "required": ["frames"],
+            "additionalProperties": False,
+        }
+        return {
+            "type": "json_schema",
+            "json_schema": {"name": "step3_observations", "schema": schema},
+        }

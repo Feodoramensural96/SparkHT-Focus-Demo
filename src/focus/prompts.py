@@ -20,8 +20,24 @@ CORRECTION_PROMPT = (
     "仅修复上一响应的 JSON 格式和 schema，不增加、删除或猜测观察结果。只返回 JSON。"
 )
 
-RESPONSE_SCHEMA_PROMPT = """返回对象必须严格采用以下结构，每个输入 frame_id 恰好出现一次且保持顺序：
-{"frames":[{"frame_id":"f-001","person":"present|absent|uncertain","phone":"visible|not_visible|uncertain","cup":"visible|not_visible|uncertain","cup_motion":"stable|changed|uncertain","confidence":0.0,"evidence":"不超过30个中文字"}]}"""
+def response_schema_prompt(frame_ids: list[str]) -> str:
+    frames = [
+        {
+            "frame_id": frame_id,
+            "person": "present|absent|uncertain",
+            "phone": "visible|not_visible|uncertain",
+            "cup": "visible|not_visible|uncertain",
+            "cup_motion": "stable|changed|uncertain",
+            "confidence": 0.0,
+            "evidence": "不超过12个中文字",
+        }
+        for frame_id in frame_ids
+    ]
+    skeleton = json.dumps({"frames": frames}, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "返回对象必须严格采用以下骨架；逐字保留其中的真实 frame_id、数量和顺序：\n"
+        f"{skeleton}"
+    )
 
 
 def user_prompt(frame_ids: list[str], timestamps: list[datetime]) -> str:
@@ -30,8 +46,8 @@ def user_prompt(frame_ids: list[str], timestamps: list[datetime]) -> str:
     return (
         f"以下图片依次为 {ids}，拍摄时间依次为 {times}。\n"
         "逐帧观察，并比较相邻帧中的手机和杯子状态。\n"
-        "evidence 使用不超过 30 个中文字，只写可见证据。\n"
-        f"{RESPONSE_SCHEMA_PROMPT}"
+        "evidence 使用不超过 12 个中文字，只写可见证据。\n"
+        f"{response_schema_prompt(frame_ids)}"
     )
 
 

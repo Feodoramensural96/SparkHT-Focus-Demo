@@ -1,0 +1,23 @@
+{% macro render_content(content) %}
+{%- if content is none -%}
+{{- '' -}}
+{%- elif content is string -%}
+{{- content -}}
+{%- elif content is mapping -%}
+{{- content['value'] if 'value' in content else content['text'] -}}
+{%- elif content is iterable -%}
+{%- for item in content -%}
+{%- if item.type == 'text' -%}
+{{- item['value'] if 'value' in item else item['text'] -}}
+{%- elif item.type == 'image' -%}
+{{- '<im_patch>' -}}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+{% endmacro %}
+{%- for message in messages %}
+{{- '<|im_start|>' + message.role + '\n' + render_content(message.content) + '<|im_end|>\n' -}}
+{%- endfor %}
+{%- if add_generation_prompt %}
+{{- '<|im_start|>assistant\n' -}}
+{%- endif %}

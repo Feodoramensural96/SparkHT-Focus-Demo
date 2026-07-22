@@ -42,6 +42,7 @@ async def benchmark(args: argparse.Namespace) -> None:
             base_url=args.base_url,
             model=args.model,
             timeout=args.timeout,
+            max_tokens=args.max_tokens,
         )
         for _ in range(args.runs):
             analysis = await client.analyze(frames)
@@ -73,11 +74,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8040/v1")
     parser.add_argument("--model", default="step3-vl-focus")
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--max-tokens", type=int, default=192)
     args = parser.parse_args()
     if not 1 <= len(args.images) <= 4:
         parser.error("provide one to four image paths")
     if args.runs < 1:
         parser.error("--runs must be at least 1")
+    if args.max_tokens < 1:
+        parser.error("--max-tokens must be at least 1")
     missing = [str(path) for path in args.images if not path.is_file()]
     if missing:
         parser.error(f"image files do not exist: {', '.join(missing)}")

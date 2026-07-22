@@ -45,3 +45,12 @@
 - 路径：`.vllm-venv`，不引用 VILab 或 `WatcheRobot_server` 的环境。
 - 版本：vLLM 0.22.0、Torch 2.11.0+cu130、Transformers 4.57.6；`torch.cuda.is_available()` 为 true。
 - 本机 `pip check` 会将 `nvidia-cusparselt-cu13==0.8.0` 标记为 platform unsupported；机器上正常提供 8030 的 TTS 隔离环境有同一条元数据警告。最终以 vLLM 导入、CUDA 探测和 8040 实际启动为判据。
+
+## Step3 实际启动（16:23–16:34）
+
+- 五个 safetensors 分片全部通过官方 SHA-256，模型总权重约 14.03 GiB。
+- 8040 由 user-systemd 临时单元 `sparkht-step3-vllm.service` 承载，返回模型名 `step3-vl-focus`。
+- 首次启动定位到 FlashInfer JIT 找不到隔离环境中的 `ninja`；启动脚本补充 `.vllm-venv/bin` 到 `PATH` 后修复。
+- 模型自带模板会无条件进入长思维链。服务改用专用无思维链模板，并通过 JSON Schema 约束结构化输出；不展示或持久化完整思维链。
+- 实际加载识别 `StepVLForConditionalGeneration`、FP8 和 Cutlass FP8 kernel；权重加载约 82 秒，EngineCore 统一内存占用约 34.1 GiB。
+- 8040、8010、8030、11434 同时运行时系统约有 42 GiB 可用内存。
