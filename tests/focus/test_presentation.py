@@ -21,13 +21,21 @@ def test_core_focus_state_mapping_is_explicit() -> None:
     assert ANIMATION_ID_BY_STATE == {
         RobotPresentationState.IDLE: "standby2",
         RobotPresentationState.LISTENING: "listening",
-        RobotPresentationState.THINKING: "thinking",
+        RobotPresentationState.THINKING: "standby2",
         RobotPresentationState.SPEAKING: "speaking",
         RobotPresentationState.ANALYZING: "processing",
         RobotPresentationState.FOCUSING: "concentration",
         RobotPresentationState.COMPLETED: "happy",
         RobotPresentationState.ERROR: "error",
     }
+
+
+def test_thinking_wait_keeps_the_neutral_standby2_loop() -> None:
+    assert (
+        ANIMATION_ID_BY_STATE[RobotPresentationState.THINKING]
+        == ANIMATION_ID_BY_STATE[RobotPresentationState.IDLE]
+        == "standby2"
+    )
 
 
 class AnimationRobot:
@@ -83,7 +91,7 @@ async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) ->
     assert robot.animation_ids == [
         "standby2",
         "concentration",
-        "thinking",
+        "standby2",
         "concentration",
     ]
     await service.close()

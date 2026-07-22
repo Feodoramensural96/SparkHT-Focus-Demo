@@ -14,6 +14,7 @@
 ### 修复
 
 - 默认待机 Behavior 从呈现睡觉效果的 `standby` 调整为循环中立表情 `standby2`。
+- 思考等待阶段改用循环的 `standby2`，避免固件 `thinking` Behavior 结束后回退到睡觉版 `standby`。
 
 ## [0.1.0] - 2026-07-22
 

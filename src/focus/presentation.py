@@ -19,7 +19,11 @@ class RobotPresentationState(str, Enum):
 ANIMATION_ID_BY_STATE: dict[RobotPresentationState, str] = {
     RobotPresentationState.IDLE: "standby2",
     RobotPresentationState.LISTENING: "listening",
-    RobotPresentationState.THINKING: "thinking",
+    # The firmware's finite ``thinking`` behavior falls back to its built-in
+    # ``standby`` face when it ends. Model/ASR latency can outlive that job,
+    # exposing the sleeping face before TTS starts. Keep this interval on the
+    # same neutral looping behavior used by idle instead.
+    RobotPresentationState.THINKING: "standby2",
     RobotPresentationState.SPEAKING: "speaking",
     RobotPresentationState.ANALYZING: "processing",
     RobotPresentationState.FOCUSING: "concentration",
