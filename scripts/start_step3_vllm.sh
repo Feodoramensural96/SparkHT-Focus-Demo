@@ -20,6 +20,7 @@ exec "$focus_vllm" serve "$focus_model" \
   --host 127.0.0.1 \
   --port 8040 \
   --trust-remote-code \
+  --reasoning-parser deepseek_r1 \
   --dtype auto \
   --max-model-len 4096 \
   --max-num-seqs 1 \

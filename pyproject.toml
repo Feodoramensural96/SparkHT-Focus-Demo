@@ -26,6 +26,9 @@ test = [
   "pytest>=8.3,<10",
   "pytest-asyncio>=0.25,<2",
 ]
+model = [
+  "huggingface-hub>=0.36,<1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/focus"]

@@ -19,7 +19,7 @@ SparkHT FastAPI :8780
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install -e '.[test]'
+.venv/bin/pip install -e '.[test,model]'
 cp .env.example .env
 # 在 .env 临时填写机器人屏幕显示的 WATCHER_PAIRING_CODE
 .venv/bin/focus-demo
@@ -32,6 +32,26 @@ FOCUS_ENABLE_ROBOT=false .venv/bin/focus-demo
 ```
 
 打开 `http://<Spark-IP>:8780/`。活动会话仪表盘可使用 `/?session=<session_id>`。
+
+### Step3-VL 服务
+
+Step3 使用单独环境，避免改变网关和已有语音服务的依赖：
+
+```bash
+python -m venv .vllm-venv
+.vllm-venv/bin/pip install 'vllm==0.22.0' 'transformers==4.57.6'
+HF_XET_HIGH_PERFORMANCE=1 .venv/bin/hf download \
+  stepfun-ai/Step3-VL-10B-FP8 \
+  --local-dir .models/Step3-VL-10B-FP8 \
+  --max-workers 4
+scripts/start_step3_vllm.sh
+```
+
+服务就绪后，`http://127.0.0.1:8040/v1/models` 应返回 `step3-vl-focus`。可用一至四张本地图重复执行真实协议与时延检查：
+
+```bash
+.venv/bin/python scripts/benchmark_step3_vlm.py --runs 3 frame-1.jpg frame-2.jpg
+```
 
 ## API
 

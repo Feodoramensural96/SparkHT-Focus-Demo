@@ -39,3 +39,9 @@
 - 8010 `/health` 返回 healthy 不能替代真实请求。首次请求错误携带模型别名会覆盖 sidecar 本地路径并尝试访问远端；适配器修复为不覆盖 sidecar 模型后，真实 WAV 请求返回 200。
 - 8030 `/v1/audio/speech` 支持 `response_format=pcm`、`stream=true`。
 - 11434 已安装 `qwen3:0.6b`。
+
+## Step3 隔离环境
+
+- 路径：`.vllm-venv`，不引用 VILab 或 `WatcheRobot_server` 的环境。
+- 版本：vLLM 0.22.0、Torch 2.11.0+cu130、Transformers 4.57.6；`torch.cuda.is_available()` 为 true。
+- 本机 `pip check` 会将 `nvidia-cusparselt-cu13==0.8.0` 标记为 platform unsupported；机器上正常提供 8030 的 TTS 隔离环境有同一条元数据警告。最终以 vLLM 导入、CUDA 探测和 8040 实际启动为判据。

@@ -36,6 +36,7 @@ class StepFunVlmClient:
             raise ValueError("Step3 accepts one to four frames")
         batch_id = f"vb_{uuid.uuid4().hex[:12]}"
         started = time.monotonic()
+        deadline = started + self.timeout
         messages = self._messages(frames)
         last_error: Exception | None = None
         previous_raw: str | None = None
@@ -46,6 +47,10 @@ class StepFunVlmClient:
                     {"role": "assistant", "content": previous_raw},
                     {"role": "user", "content": CORRECTION_PROMPT},
                 ]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                last_error = TimeoutError("Step3 batch exceeded its total timeout")
+                break
             try:
                 response = await self.http.post(
                     f"{self.base_url}/chat/completions",
@@ -55,9 +60,13 @@ class StepFunVlmClient:
                         "temperature": 0,
                         "max_tokens": self.max_tokens,
                     },
-                    timeout=self.timeout,
+                    timeout=remaining,
                 )
                 response.raise_for_status()
+            except httpx.HTTPError as error:
+                last_error = error
+                break
+            try:
                 raw = response.json()["choices"][0]["message"]["content"]
                 if not isinstance(raw, str):
                     raise TypeError("Step3 response content must be a string")
@@ -67,13 +76,7 @@ class StepFunVlmClient:
                     [frame.frame_id for frame in frames],
                     {frame.frame_id: frame.captured_at for frame in frames},
                 )
-            except (
-                httpx.HTTPError,
-                KeyError,
-                IndexError,
-                TypeError,
-                ValueError,
-            ) as error:
+            except (KeyError, IndexError, TypeError, ValueError) as error:
                 last_error = error
                 continue
             return BatchAnalysis(

@@ -27,10 +27,13 @@ class BatchBuilder(Generic[FrameT]):
         return batch
 
     def flush_tail(self) -> list[FrameT] | None:
-        if len(self._frames) < 2:
-            return None
         frames, self._frames = self._frames, []
+        if len(frames) < 2:
+            return None
         return frames
+
+    def clear(self) -> None:
+        self._frames = []
 
 
 class VisionPriorityScheduler(Generic[FrameT, ResultT]):
@@ -63,6 +66,7 @@ class VisionPriorityScheduler(Generic[FrameT, ResultT]):
         self._idle_task: asyncio.Task[None] | None = None
         self._wakeup = asyncio.Event()
         self._stopping = False
+        self._discard_active = False
 
     @property
     def pending_batch(self) -> list[FrameT] | None:
@@ -116,6 +120,20 @@ class VisionPriorityScheduler(Generic[FrameT, ResultT]):
             self._idle_task = asyncio.create_task(self._arm_after_idle())
         self._wakeup.set()
 
+    async def discard(self) -> None:
+        """Drop every batch so work from one session cannot enter the next."""
+        self._pending = None
+        self._pending_retry = 0
+        task = self._active_task
+        if task is not None and not task.done():
+            self._discard_active = True
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._wakeup.set()
+
     async def _arm_after_idle(self) -> None:
         try:
             await asyncio.sleep(self.voice_idle_seconds)
@@ -141,11 +159,14 @@ class VisionPriorityScheduler(Generic[FrameT, ResultT]):
             except asyncio.CancelledError:
                 if self._stopping:
                     return
-                if self._on_paused is not None:
-                    await self._on_paused(self._current)
-                if self._current_retry < 1 and self._pending is None:
-                    self._pending = self._current
-                    self._pending_retry = self._current_retry + 1
+                if self._discard_active:
+                    self._discard_active = False
+                else:
+                    if self._on_paused is not None:
+                        await self._on_paused(self._current)
+                    if self._current_retry < 1 and self._pending is None:
+                        self._pending = self._current
+                        self._pending_retry = self._current_retry + 1
             except Exception:
                 # The analyzer owns failure recording; one failed batch must not stop scheduling.
                 pass

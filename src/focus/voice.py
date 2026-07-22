@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from array import array
 from collections.abc import AsyncIterator
 
@@ -84,8 +85,11 @@ class VoiceController:
                 break
             await self.service.set_voice_busy(True)
             try:
+                speech_ended_at = time.monotonic()
                 transcript = await self.asr.transcribe(utterance)
-                await self._handle_transcript_while_busy(transcript)
+                await self._handle_transcript_while_busy(
+                    transcript, speech_ended_at=speech_ended_at
+                )
             finally:
                 await self.service.set_voice_busy(False)
 
@@ -95,11 +99,15 @@ class VoiceController:
     async def handle_transcript(self, transcript: str) -> str:
         await self.service.set_voice_busy(True)
         try:
-            return await self._handle_transcript_while_busy(transcript)
+            return await self._handle_transcript_while_busy(
+                transcript, speech_ended_at=time.monotonic()
+            )
         finally:
             await self.service.set_voice_busy(False)
 
-    async def _handle_transcript_while_busy(self, transcript: str) -> str:
+    async def _handle_transcript_while_busy(
+        self, transcript: str, *, speech_ended_at: float
+    ) -> str:
         intent = match_focus_intent(transcript)
         active = getattr(self.service, "active_session", None)
         if active is None:
@@ -156,9 +164,17 @@ class VoiceController:
         else:
             reply = "我听到了。专注统计命令仍然可以正常使用。"
 
+        speech_to_first_audio_ms = None
         if self.tts is not None:
             try:
                 await self.robot.play_pcm(self.tts.synthesize(reply))
+                playback_started_at = getattr(
+                    self.robot, "last_playback_started_at", None
+                )
+                if playback_started_at is not None:
+                    speech_to_first_audio_ms = round(
+                        (playback_started_at - speech_ended_at) * 1000
+                    )
             except Exception:
                 pass
         if emit is not None:
@@ -167,6 +183,7 @@ class VoiceController:
                 {
                     "transcript": transcript[:80],
                     "intent": intent.value if intent else None,
+                    "speech_to_first_audio_ms": speech_to_first_audio_ms,
                 },
             )
         return reply

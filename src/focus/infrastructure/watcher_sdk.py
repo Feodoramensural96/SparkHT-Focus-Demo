@@ -34,6 +34,7 @@ class WatcheRobotAdapter:
         self._factory = robot_factory
         self._robot: Any | None = None
         self._connect_lock = asyncio.Lock()
+        self.last_playback_started_at: float | None = None
 
     @property
     def connected(self) -> bool:
@@ -116,6 +117,7 @@ class WatcheRobotAdapter:
         are played as short sequential SDK streams instead of buffering the whole reply.
         """
         robot = self._require_robot()
+        self.last_playback_started_at = None
         first = True
         buffered = bytearray()
         async for chunk in chunks:
@@ -141,8 +143,7 @@ class WatcheRobotAdapter:
             raise RuntimeError("WatcheRobot SDK is not connected")
         return self._robot
 
-    @staticmethod
-    async def _play_block(robot: Any, block: bytes) -> None:
+    async def _play_block(self, robot: Any, block: bytes) -> None:
         if len(block) % 2:
             block = block[:-1]
         if not block:
@@ -154,4 +155,6 @@ class WatcheRobotAdapter:
             channels=1,
             sample_width_bytes=2,
         )
+        if self.last_playback_started_at is None:
+            self.last_playback_started_at = time.monotonic()
         await asyncio.to_thread(playback.wait, 10.0)

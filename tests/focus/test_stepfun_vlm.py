@@ -101,3 +101,29 @@ async def test_invalid_json_gets_exactly_one_correction_retry(tmp_path) -> None:
     assert calls == 2
     assert result.status == "analysis_failed"
     assert result.observations == []
+
+
+@pytest.mark.asyncio
+async def test_http_failure_is_not_retried(tmp_path) -> None:
+    path = tmp_path / "frame.jpg"
+    path.write_bytes(b"jpeg")
+    frame = CapturedFrame(
+        frame_id="f-1",
+        captured_at=datetime.now(UTC),
+        path=path,
+        sequence=1,
+        latency_ms=1,
+    )
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, text="warming up")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = StepFunVlmClient(http=http, base_url="http://step/v1", model="step3")
+        result = await client.analyze([frame])
+
+    assert calls == 1
+    assert result.status == "analysis_failed"

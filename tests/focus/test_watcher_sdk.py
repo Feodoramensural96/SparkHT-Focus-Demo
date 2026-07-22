@@ -98,3 +98,4 @@ async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic
     assert not destination.with_suffix(".jpg.tmp").exists()
     assert frame.path == destination
     assert robot.audio_chunks == [b"\x00\x00" * 10, b"\x01\x00" * 10]
+    assert adapter.last_playback_started_at is not None

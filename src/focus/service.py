@@ -96,6 +96,9 @@ class FocusService:
         async with self._lock:
             if self._active is not None and self._active.state not in _TERMINAL:
                 return self._active, True
+            self.batch_builder.clear()
+            if self._scheduler is not None:
+                await self._scheduler.discard()
             now = datetime.now(UTC)
             duration = request.duration_seconds
             if "duration_seconds" not in request.model_fields_set:
@@ -146,7 +149,7 @@ class FocusService:
     async def stop_session(self, session_id: str) -> FocusSession:
         async with self._lock:
             session = self.get_session(session_id)
-            if session.state in {SessionState.COMPLETED, SessionState.CANCELLED}:
+            if session.state in _TERMINAL:
                 return session
             session.state = SessionState.FINALIZING
             self.store.save_session(session)
@@ -172,11 +175,12 @@ class FocusService:
     async def cancel_session(self, session_id: str) -> FocusSession:
         async with self._lock:
             session = self.get_session(session_id)
-            if session.state is SessionState.CANCELLED:
-                return session
-            if session.state is SessionState.COMPLETED:
+            if session.state in _TERMINAL:
                 return session
             await self._stop_sampling()
+            self.batch_builder.clear()
+            if self._scheduler is not None:
+                await self._scheduler.discard()
             session.state = SessionState.CANCELLED
             session.ended_at = datetime.now(UTC)
             self.store.save_session(session)
