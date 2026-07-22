@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -17,6 +18,8 @@ from focus.service import FocusService
 class FakeRobot:
     def __init__(self) -> None:
         self.connected = False
+        self.last_playback_started_at = None
+        self.spoken = b""
 
     async def connect(self) -> None:
         self.connected = True
@@ -37,6 +40,13 @@ class FakeRobot:
             sequence=sequence,
             latency_ms=1,
         )
+
+    async def play_pcm(self, chunks) -> None:
+        self.last_playback_started_at = None
+        async for chunk in chunks:
+            if self.last_playback_started_at is None:
+                self.last_playback_started_at = time.monotonic()
+            self.spoken += chunk
 
 
 class FakeVision:
@@ -67,6 +77,17 @@ class FakeVision:
             latency_ms=2,
             status="completed",
         )
+
+
+class FakeTts:
+    def synthesize(self, text):
+        async def chunks():
+            yield text.encode("utf-8")
+
+        return chunks()
+
+    async def health(self) -> bool:
+        return True
 
 
 @pytest.mark.asyncio
@@ -110,3 +131,39 @@ async def test_accelerated_session_captures_two_batches_and_builds_report(
     assert len(completed) >= 2
     assert len(completed[0]["data"]["observations"]) == 4
     assert completed[0]["data"]["model_name"] == "fake-step3"
+
+
+@pytest.mark.asyncio
+async def test_duration_timer_speaks_exactly_one_completed_summary(tmp_path) -> None:
+    robot = FakeRobot()
+    service = FocusService(
+        store=FileSessionStore(tmp_path),
+        robot=robot,
+        vision=FakeVision(),
+        tts=FakeTts(),
+        demo_capture_interval=10,
+    )
+    await service.start()
+    try:
+        session, _ = await service.create_session(FocusSessionCreate())
+        await service._auto_stop(session.session_id, 0)
+    finally:
+        await service.close()
+
+    assert service.get_session(session.session_id).state.value == "completed"
+    assert robot.spoken.decode("utf-8").startswith("统计完成")
+    events = [
+        json.loads(line)
+        for line in (tmp_path / session.session_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    summaries = [
+        event
+        for event in events
+        if event["type"] == "voice.turn_completed"
+        and event["data"].get("intent") == "auto_summary"
+    ]
+    assert len(summaries) == 1
+    assert summaries[0]["data"]["source"] == "session_timer"
+    assert summaries[0]["data"]["speech_to_first_audio_ms"] >= 0

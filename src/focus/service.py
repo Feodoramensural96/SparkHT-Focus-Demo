@@ -290,7 +290,66 @@ class FocusService:
         await asyncio.sleep(duration)
         session = self.get_session(session_id)
         if session.state is SessionState.RUNNING:
-            await self.stop_session(session_id)
+            session = await self.stop_session(session_id)
+            await self._announce_completed_report(session)
+
+    async def _announce_completed_report(self, session: FocusSession) -> None:
+        """Speak one deterministic summary when the duration timer ends a session."""
+        if self.robot is None:
+            return
+        if self.tts is None:
+            session.degraded_components["tts"] = "auto_summary_not_configured"
+            self.store.save_session(session)
+            self._emit(
+                session,
+                "service.degraded",
+                {"component": "tts", "reason": "auto_summary_not_configured"},
+            )
+            return
+
+        report = self.get_report(session.session_id)
+        if report.focus_proxy_score is None:
+            reply = "统计完成，但有效视觉样本不足，暂时无法评分。"
+        else:
+            reply = (
+                f"统计完成：在位率 {report.presence_ratio * 100:.0f}% ，"
+                f"手机可见率 {report.phone_visible_ratio * 100:.0f}% ，"
+                f"专注趋势 {report.focus_proxy_score:.0f} 分。"
+            )
+        started_at = time.monotonic()
+        self._emit(
+            session,
+            "voice.turn_started",
+            {"source": "session_timer", "intent": "auto_summary"},
+        )
+        try:
+            await self.robot.play_pcm(self.tts.synthesize(reply))
+        except Exception as error:
+            reason = f"auto_summary_failed: {str(error)[:160]}"
+            session.degraded_components["tts"] = reason
+            self.store.save_session(session)
+            self._emit(
+                session,
+                "service.degraded",
+                {"component": "tts", "reason": reason},
+            )
+            return
+
+        playback_started_at = self.robot.last_playback_started_at
+        first_audio_ms = (
+            round((playback_started_at - started_at) * 1000)
+            if playback_started_at is not None
+            else None
+        )
+        self._emit(
+            session,
+            "voice.turn_completed",
+            {
+                "source": "session_timer",
+                "intent": "auto_summary",
+                "speech_to_first_audio_ms": first_audio_ms,
+            },
+        )
 
     async def _stop_sampling(self) -> None:
         current = asyncio.current_task()
