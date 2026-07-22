@@ -31,6 +31,7 @@ git archive \
 
 unzip -tq "$package_archive" >/dev/null
 sha256sum "$package_archive" >"${package_archive}.sha256"
+chmod 0644 "$package_archive" "${package_archive}.sha256"
 
 printf 'Created %s\n' "$package_archive"
 printf 'Checksum %s\n' "${package_archive}.sha256"
