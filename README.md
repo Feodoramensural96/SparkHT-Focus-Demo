@@ -21,9 +21,14 @@ SparkHT FastAPI :8780
 python -m venv .venv
 .venv/bin/pip install -e '.[test,model]'
 cp .env.example .env
-# 在 .env 临时填写机器人屏幕显示的 WATCHER_PAIRING_CODE
-.venv/bin/focus-demo
+# 配对码只在当前隐藏终端输入，不写入 .env、历史或日志
+IFS= read -r -s watcher_pairing_code
+WATCHER_PAIRING_CODE="$watcher_pairing_code" .venv/bin/focus-demo
+unset watcher_pairing_code
 ```
+
+持续远处谈话的嘈杂现场可在启动命令前设置
+`FOCUS_VAD_THRESHOLD=1500`；安静环境保持默认值 500。用户发命令时需要靠近机器人正常说话。
 
 无需机器人验证 HTTP 层时：
 
