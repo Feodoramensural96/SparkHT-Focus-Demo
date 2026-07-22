@@ -486,8 +486,11 @@ class FocusService:
     async def _restore_default_presentation(self) -> bool:
         """Restore the stable loop for the current operating mode."""
         state = RobotPresentationState.IDLE
-        if self._active is not None and self._active.state is SessionState.RUNNING:
-            state = RobotPresentationState.FOCUSING
+        if self._active is not None:
+            if self._active.state is SessionState.RUNNING:
+                state = RobotPresentationState.FOCUSING
+            elif self._active.state is SessionState.FINALIZING:
+                state = RobotPresentationState.ANALYZING
         return await self._show_presentation(state)
 
     async def _enter_focus_presentation(self) -> bool:
