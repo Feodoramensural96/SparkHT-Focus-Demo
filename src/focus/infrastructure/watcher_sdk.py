@@ -34,6 +34,11 @@ class WatcheRobotAdapter:
         self._factory = robot_factory
         self._robot: Any | None = None
         self._connect_lock = asyncio.Lock()
+        self._playback_lock = asyncio.Lock()
+        self._microphone_session: Any | None = None
+        self._microphone_pause_requested = asyncio.Event()
+        self._microphone_paused = asyncio.Event()
+        self._microphone_resume = asyncio.Event()
         self.last_playback_started_at: float | None = None
 
     @property
@@ -62,6 +67,7 @@ class WatcheRobotAdapter:
             )
 
     async def close(self) -> None:
+        self._microphone_resume.set()
         robot, self._robot = self._robot, None
         if robot is not None:
             await asyncio.to_thread(robot.close)
@@ -105,16 +111,37 @@ class WatcheRobotAdapter:
         )
 
     async def microphone_chunks(self) -> AsyncIterator[bytes]:
-        microphone = await asyncio.to_thread(self._require_robot().microphone.open)
+        robot = self._require_robot()
+        microphone = await asyncio.to_thread(robot.microphone.open)
+        self._microphone_session = microphone
+        self._microphone_paused.clear()
+        self._microphone_resume.clear()
         try:
             while self.connected:
+                if self._microphone_pause_requested.is_set():
+                    await asyncio.to_thread(microphone.close)
+                    microphone = None
+                    self._microphone_session = None
+                    self._microphone_paused.set()
+                    await self._microphone_resume.wait()
+                    self._microphone_resume.clear()
+                    self._microphone_paused.clear()
+                    if not self.connected:
+                        break
+                    microphone = await asyncio.to_thread(robot.microphone.open)
+                    self._microphone_session = microphone
+                    continue
                 try:
                     frame = await asyncio.to_thread(microphone.read, 1.0)
                 except TimeoutError:
                     continue
                 yield frame.data
         finally:
-            await asyncio.to_thread(microphone.close)
+            if microphone is not None:
+                await asyncio.to_thread(microphone.close)
+            self._microphone_session = None
+            if self._microphone_pause_requested.is_set():
+                self._microphone_paused.set()
 
     async def play_pcm(self, chunks: AsyncIterator[bytes]) -> None:
         """Start the first SDK stream as soon as its PCM chunk arrives.
@@ -122,24 +149,31 @@ class WatcheRobotAdapter:
         Protocol v1 requires total bytes and SHA before each stream, so generated chunks
         are played as short sequential SDK streams instead of buffering the whole reply.
         """
-        robot = self._require_robot()
-        self.last_playback_started_at = None
-        first = True
-        buffered = bytearray()
-        async for chunk in chunks:
-            if not chunk:
-                continue
-            if first:
-                await self._play_block(robot, chunk)
-                first = False
-                continue
-            buffered.extend(chunk)
-            while len(buffered) >= self.followup_audio_block_bytes:
-                block = bytes(buffered[: self.followup_audio_block_bytes])
-                del buffered[: self.followup_audio_block_bytes]
-                await self._play_block(robot, block)
-        if buffered:
-            await self._play_block(robot, bytes(buffered))
+        async with self._playback_lock:
+            robot = self._require_robot()
+            resume_microphone = await self._pause_microphone_for_playback()
+            self.last_playback_started_at = None
+            try:
+                first = True
+                buffered = bytearray()
+                async for chunk in chunks:
+                    if not chunk:
+                        continue
+                    if first:
+                        await self._play_block(robot, chunk)
+                        first = False
+                        continue
+                    buffered.extend(chunk)
+                    while len(buffered) >= self.followup_audio_block_bytes:
+                        block = bytes(buffered[: self.followup_audio_block_bytes])
+                        del buffered[: self.followup_audio_block_bytes]
+                        await self._play_block(robot, block)
+                if buffered:
+                    await self._play_block(robot, bytes(buffered))
+            finally:
+                if resume_microphone:
+                    self._microphone_pause_requested.clear()
+                    self._microphone_resume.set()
 
     async def stop_audio(self) -> None:
         await asyncio.to_thread(self._require_robot().audio.stop)
@@ -148,6 +182,18 @@ class WatcheRobotAdapter:
         if self._robot is None:
             raise RuntimeError("WatcheRobot SDK is not connected")
         return self._robot
+
+    async def _pause_microphone_for_playback(self) -> bool:
+        if self._microphone_session is None:
+            return False
+        self._microphone_resume.clear()
+        self._microphone_pause_requested.set()
+        try:
+            await asyncio.wait_for(self._microphone_paused.wait(), timeout=2.0)
+        except TimeoutError as error:
+            self._microphone_pause_requested.clear()
+            raise RuntimeError("microphone did not pause before playback") from error
+        return True
 
     async def _play_block(self, robot: Any, block: bytes) -> None:
         if len(block) % 2:

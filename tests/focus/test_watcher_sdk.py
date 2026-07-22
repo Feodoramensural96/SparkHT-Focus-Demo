@@ -1,3 +1,5 @@
+import asyncio
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -18,13 +20,18 @@ class FakePlayback:
 
 
 class FakeMicrophone:
-    closed = False
+    def __init__(self, parent) -> None:
+        self.parent = parent
+        self.closed = False
 
     def read(self, timeout=None):
+        time.sleep(0.01)
         raise TimeoutError
 
     def close(self):
-        self.closed = True
+        if not self.closed:
+            self.closed = True
+            self.parent.microphone_close_calls += 1
 
 
 class FakeRobot:
@@ -33,11 +40,13 @@ class FakeRobot:
         self.audio_chunks: list[bytes] = []
         self.audio_stop_calls = 0
         self.fail_playback = False
+        self.microphone_open_calls = 0
+        self.microphone_close_calls = 0
         self.closed = False
         self._closed = False
         self.camera = self.Camera(self)
         self.audio = self.Audio(self)
-        self.microphone = self.Microphone()
+        self.microphone = self.Microphone(self)
 
     class Camera:
         def __init__(self, parent) -> None:
@@ -64,8 +73,12 @@ class FakeRobot:
             return None
 
     class Microphone:
+        def __init__(self, parent) -> None:
+            self.parent = parent
+
         def open(self):
-            return FakeMicrophone()
+            self.parent.microphone_open_calls += 1
+            return FakeMicrophone(self.parent)
 
     def close(self):
         self.closed = True
@@ -148,4 +161,37 @@ async def test_playback_timeout_stops_stale_robot_audio() -> None:
 
     assert adapter.last_playback_started_at is not None
     assert robot.audio_stop_calls == 1
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_external_playback_pauses_and_resumes_active_microphone() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+    microphone = adapter.microphone_chunks()
+    reader = asyncio.create_task(anext(microphone))
+    for _ in range(100):
+        if robot.microphone_open_calls == 1:
+            break
+        await asyncio.sleep(0.001)
+    assert robot.microphone_open_calls == 1
+
+    async def chunks():
+        yield b"\x00\x00" * 10
+
+    await adapter.play_pcm(chunks())
+    for _ in range(100):
+        if robot.microphone_open_calls == 2:
+            break
+        await asyncio.sleep(0.001)
+
+    assert robot.microphone_open_calls == 2
+    assert robot.microphone_close_calls == 1
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+    assert robot.microphone_close_calls == 2
     await adapter.close()
