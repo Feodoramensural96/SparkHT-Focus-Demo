@@ -72,7 +72,8 @@ class FocusRuntime:
                 asr=self.asr,
                 llm=self.llm,
                 tts=self.tts,
-                vad=EnergyVad(threshold=settings.focus_vad_threshold),
+                vad=EnergyVad(threshold=settings.focus_vad_idle_threshold),
+                focus_vad_threshold=settings.focus_vad_threshold,
             )
         self.app = create_app(self.service)
         self._voice_task: asyncio.Task[None] | None = None

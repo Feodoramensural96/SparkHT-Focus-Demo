@@ -143,6 +143,30 @@ async def test_energy_vad_announces_listening_only_when_voice_starts() -> None:
     assert len(utterances) == 1
 
 
+def test_vad_threshold_is_2500_only_while_focus_session_runs() -> None:
+    service = FakeFocusService()
+    vad = EnergyVad(threshold=500)
+    controller = VoiceController(
+        service=service,
+        robot=FakeRobot(),
+        asr=None,
+        llm=None,
+        tts=None,
+        vad=vad,
+        focus_vad_threshold=2500,
+    )
+
+    controller._sync_vad_threshold()
+    assert vad.threshold == 2500
+    assert vad.threshold_provider is not None
+    assert vad.threshold_provider() == 2500
+
+    service.session.state = SessionState.COMPLETED
+    # The provider is evaluated for every audio chunk, so an HTTP state change
+    # applies even while the current microphone generator is already waiting.
+    assert vad.threshold_provider() == 500
+
+
 class SequencedAsr:
     def __init__(self, transcripts):
         self.transcripts = iter(transcripts)

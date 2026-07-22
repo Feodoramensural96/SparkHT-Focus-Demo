@@ -27,6 +27,7 @@ class EnergyVad:
         self.min_voice_chunks = min_voice_chunks
         self.max_chunks = max_chunks
         self.on_voice_started: Callable[[], Awaitable[None]] | None = None
+        self.threshold_provider: Callable[[], int] | None = None
 
     async def utterances(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
         buffered: list[bytes] = []
@@ -34,7 +35,12 @@ class EnergyVad:
         silence = 0
         async for chunk in chunks:
             level = self._rms(chunk)
-            if level >= self.threshold:
+            threshold = (
+                self.threshold_provider()
+                if self.threshold_provider is not None
+                else self.threshold
+            )
+            if level >= threshold:
                 if voiced == 0 and self.on_voice_started is not None:
                     await self.on_voice_started()
                 voiced += 1
@@ -71,6 +77,7 @@ class VoiceController:
         llm: LlmPort | None,
         tts: TtsPort | None,
         vad: EnergyVad | None = None,
+        focus_vad_threshold: int = 2_500,
     ) -> None:
         self.service = service
         self.robot = robot
@@ -78,7 +85,12 @@ class VoiceController:
         self.llm = llm
         self.tts = tts
         self.vad = vad or EnergyVad()
+        self.focus_vad_threshold = focus_vad_threshold
+        self._idle_vad_threshold = (
+            self.vad.threshold if isinstance(self.vad, EnergyVad) else None
+        )
         if isinstance(self.vad, EnergyVad):
+            self.vad.threshold_provider = self._vad_threshold_for_current_session
             self.vad.on_voice_started = lambda: self._show_voice_state(
                 RobotPresentationState.LISTENING
             )
@@ -89,6 +101,7 @@ class VoiceController:
             return
         self._stopping = False
         while not self._stopping:
+            self._sync_vad_threshold()
             # The firmware pauses microphone upload while speaker playback is active.
             # Treat every utterance as a separate microphone lease: close it before
             # ASR/TTS, then reopen it for the next turn after playback completes.
@@ -165,6 +178,7 @@ class VoiceController:
 
         if intent is FocusIntent.START:
             session, reused = await self.service.create_session(FocusSessionCreate())
+            self._sync_vad_threshold()
             if emit is not None and starts_new_session:
                 emit("voice.turn_started", {"transcript": transcript[:80]})
             if session.state is SessionState.FAILED:
@@ -188,6 +202,7 @@ class VoiceController:
                 reply = "当前没有正在进行的专注统计。"
             else:
                 await self.service.stop_session(active.session_id)
+                self._sync_vad_threshold()
                 report = self.service.get_report(active.session_id)
                 if report.focus_proxy_score is None:
                     reply = "统计完成，但有效视觉样本不足，暂时无法评分。"
@@ -202,6 +217,7 @@ class VoiceController:
                 reply = "当前没有正在进行的专注统计。"
             else:
                 await self.service.cancel_session(active.session_id)
+                self._sync_vad_threshold()
                 reply = "已取消本次专注统计，不会生成评分。"
         elif self.llm is not None:
             try:
@@ -235,6 +251,25 @@ class VoiceController:
                 },
             )
         return reply
+
+    def _sync_vad_threshold(self) -> None:
+        """Use stricter voice triggering while a focus session is active."""
+        if not isinstance(self.vad, EnergyVad) or self._idle_vad_threshold is None:
+            return
+        self.vad.threshold = self._vad_threshold_for_current_session()
+
+    def _vad_threshold_for_current_session(self) -> int:
+        """Resolve per chunk so HTTP-started sessions take effect immediately."""
+        if self._idle_vad_threshold is None:
+            return self.focus_vad_threshold
+        active = getattr(self.service, "active_session", None)
+        if active is None:
+            active = getattr(self.service, "session", None)
+        return (
+            self.focus_vad_threshold
+            if active is not None and active.state is SessionState.RUNNING
+            else self._idle_vad_threshold
+        )
 
     async def _show_voice_state(self, state: RobotPresentationState) -> None:
         show = getattr(self.service, "show_voice_state", None)

@@ -1,7 +1,7 @@
 import pytest
 
 from focus.infrastructure.session_store import FileSessionStore
-from focus.models import FocusMode, FocusSession, SessionState
+from focus.models import FocusMode, FocusSession, FocusSessionCreate, SessionState
 from focus.presentation import (
     ANIMATION_ID_BY_STATE,
     V3_1_ANIMATION_IDS,
@@ -46,6 +46,17 @@ class AnimationRobot:
         return True
 
 
+class FocusEntryRobot(AnimationRobot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.focus_entry_calls = 0
+
+    async def enter_focus_mode(self) -> bool:
+        self.focus_entry_calls += 1
+        self.animation_ids.append("concentration-loop")
+        return True
+
+
 @pytest.mark.asyncio
 async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) -> None:
     robot = AnimationRobot()
@@ -70,6 +81,33 @@ async def test_voice_animation_preempts_vision_and_restores_default(tmp_path) ->
         "standby",
         "concentration",
         "thinking",
-        "standby",
+        "concentration",
     ]
     await service.close()
+
+
+@pytest.mark.asyncio
+async def test_session_start_runs_focus_entry_even_during_voice_override(tmp_path) -> None:
+    robot = FocusEntryRobot()
+
+    class CameraVision:
+        async def analyze(self, frames):
+            raise AssertionError("capture loop should not run in this assertion")
+
+    service = FocusService(
+        store=FileSessionStore(tmp_path), robot=robot, vision=CameraVision()
+    )
+    robot.warmup_camera = lambda: _async_none()
+    service._voice_busy = True
+
+    session, reused = await service.create_session(FocusSessionCreate())
+
+    assert reused is False
+    assert session.state is SessionState.RUNNING
+    assert robot.focus_entry_calls == 1
+    await service.cancel_session(session.session_id)
+    await service.close()
+
+
+async def _async_none() -> None:
+    return None

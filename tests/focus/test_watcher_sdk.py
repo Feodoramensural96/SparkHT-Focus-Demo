@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 from datetime import UTC, datetime
 
@@ -18,6 +19,15 @@ class FakePlayback:
         self.wait_timeout = timeout
         if self.fail:
             raise TimeoutError("playback timeout")
+        return self
+
+
+class FakeJob:
+    def __init__(self) -> None:
+        self.wait_timeout = None
+
+    def wait(self, timeout=None):
+        self.wait_timeout = timeout
         return self
 
 
@@ -46,13 +56,20 @@ class FakeRobot:
         self.microphone_open_calls = 0
         self.microphone_close_calls = 0
         self.animation_ids: list[str] = []
+        self.behavior_ids: list[tuple[str, int]] = []
+        self.motion_targets: list[dict] = []
+        self.motion_jobs: list[FakeJob] = []
         self.animation_supported = True
+        self.behavior_supported = True
+        self.motion_supported = True
         self.closed = False
         self._closed = False
         self.camera = self.Camera(self)
         self.audio = self.Audio(self)
         self.microphone = self.Microphone(self)
         self.animation = self.Animation(self)
+        self.behavior = self.Behavior(self)
+        self.motion = self.Motion(self)
 
     class Camera:
         def __init__(self, parent) -> None:
@@ -96,8 +113,30 @@ class FakeRobot:
             self.parent.animation_ids.append(animation_id)
             return object()
 
+    class Behavior:
+        def __init__(self, parent) -> None:
+            self.parent = parent
+
+        def play(self, behavior_id, *, repeat=1):
+            self.parent.behavior_ids.append((behavior_id, repeat))
+            return object()
+
+    class Motion:
+        def __init__(self, parent) -> None:
+            self.parent = parent
+
+        def move_to(self, **target):
+            self.parent.motion_targets.append(target)
+            job = FakeJob()
+            self.parent.motion_jobs.append(job)
+            return job
+
     def supports(self, capability):
-        return capability != "animation" or self.animation_supported
+        return {
+            "animation": self.animation_supported,
+            "behavior": self.behavior_supported,
+            "motion": self.motion_supported,
+        }.get(capability, True)
 
     def close(self):
         self.closed = True
@@ -250,4 +289,95 @@ async def test_animation_play_is_capability_checked_and_deduplicated() -> None:
     robot.animation_supported = False
     assert await adapter.play_animation("happy") is False
     assert robot.animation_ids == ["listening", "speaking"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_focus_entry_nods_once_then_enters_firmware_loop() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    assert await adapter.enter_focus_mode() is True
+
+    assert robot.animation_ids == ["concentration"]
+    assert robot.motion_targets == [
+        {
+            "pan_deg": 90,
+            "tilt_deg": 105,
+            "duration_ms": 500,
+        },
+        {
+            "pan_deg": 90,
+            "tilt_deg": 125,
+            "duration_ms": 300,
+        },
+        {
+            "pan_deg": 90,
+            "tilt_deg": 120,
+            "duration_ms": 400,
+        },
+    ]
+    assert all(job.wait_timeout == 5.0 for job in robot.motion_jobs)
+    assert robot.behavior_ids == [("concentration", 1)]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_looping_behavior_is_deduplicated_and_preempts_animation_cache() -> None:
+    robot = FakeRobot()
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    assert await adapter.play_behavior("concentration") is True
+    assert await adapter.play_behavior("concentration") is True
+    assert await adapter.play_animation("speaking") is True
+    assert await adapter.play_behavior("concentration") is True
+
+    assert robot.behavior_ids == [("concentration", 1), ("concentration", 1)]
+    assert robot.animation_ids == ["speaking"]
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_transient_face_waits_for_atomic_focus_entry() -> None:
+    robot = FakeRobot()
+    motion_started = threading.Event()
+    release_motion = threading.Event()
+
+    class BlockingMotion(robot.Motion):
+        def move_to(self, **target):
+            job = super().move_to(**target)
+            original_wait = job.wait
+
+            def wait(timeout=None):
+                motion_started.set()
+                assert release_motion.wait(2.0)
+                return original_wait(timeout)
+
+            job.wait = wait
+            return job
+
+    robot.motion = BlockingMotion(robot)
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    entry = asyncio.create_task(adapter.enter_focus_mode())
+    assert await asyncio.to_thread(motion_started.wait, 1.0)
+    transient = asyncio.create_task(adapter.play_behavior("thinking"))
+    await asyncio.sleep(0.01)
+
+    assert not transient.done()
+    assert robot.behavior_ids == []
+
+    release_motion.set()
+    assert await entry is True
+    assert await transient is True
+    assert robot.behavior_ids == [("concentration", 1), ("thinking", 1)]
     await adapter.close()

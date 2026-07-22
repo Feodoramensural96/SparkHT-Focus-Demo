@@ -150,7 +150,7 @@ class FocusService:
                     )
                     await self._show_presentation(RobotPresentationState.ERROR)
                     return session, False
-                await self._show_presentation(RobotPresentationState.FOCUSING)
+                await self._enter_focus_presentation()
                 self._capture_task = asyncio.create_task(
                     self._capture_loop(session.session_id),
                     name=f"capture-{session.session_id}",
@@ -473,7 +473,9 @@ class FocusService:
         """Best-effort display update; animation failures never stop the Demo."""
         if self.robot is None or self._voice_busy and not voice_override:
             return False
-        play = getattr(self.robot, "play_animation", None)
+        play = getattr(self.robot, "play_behavior", None)
+        if play is None:
+            play = getattr(self.robot, "play_animation", None)
         if play is None:
             return False
         try:
@@ -482,13 +484,25 @@ class FocusService:
             return False
 
     async def _restore_default_presentation(self) -> bool:
-        """Return to one stable face instead of replaying the session state.
+        """Restore the stable loop for the current operating mode."""
+        state = RobotPresentationState.IDLE
+        if self._active is not None and self._active.state is SessionState.RUNNING:
+            state = RobotPresentationState.FOCUSING
+        return await self._show_presentation(state)
 
-        The robot-side SDK Control App owns connection status. Reconstructing a
-        session-derived face here and then immediately entering another voice or
-        vision state causes visible back-and-forth switching.
-        """
-        return await self._show_presentation(RobotPresentationState.IDLE)
+    async def _enter_focus_presentation(self) -> bool:
+        """Run the one-shot focus entrance before holding its looping face."""
+        if self.robot is None:
+            return False
+        enter = getattr(self.robot, "enter_focus_mode", None)
+        if enter is not None:
+            try:
+                return bool(await enter())
+            except Exception:
+                return False
+        return await self._show_presentation(
+            RobotPresentationState.FOCUSING, voice_override=True
+        )
 
     def _build_report(self, session: FocusSession) -> FocusReport:
         stats = session.stats
