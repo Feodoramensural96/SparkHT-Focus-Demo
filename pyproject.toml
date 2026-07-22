@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sparkht-focus"
+version = "0.1.0"
+description = "SparkHT 端侧快慢双系统专注统计 Demo"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.8,<3",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "watcherobot>=0.1.0a4,<0.2",
+]
+
+[project.scripts]
+focus-demo = "focus.runtime:main"
+
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.25,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/focus"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
