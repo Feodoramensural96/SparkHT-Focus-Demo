@@ -126,3 +126,24 @@ async def test_sdk_warmup_failure_marks_session_failed(tmp_path) -> None:
     assert session.degraded_components["watcher_sdk"] == "camera unavailable"
     assert (await service.stop_session(session.session_id)).state is SessionState.FAILED
     assert (await service.cancel_session(session.session_id)).state is SessionState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_sdk_connect_failure_keeps_http_service_available(tmp_path) -> None:
+    class OfflineRobot:
+        connected = False
+
+        async def connect(self):
+            raise TimeoutError("waiting for sdk.control.app")
+
+        async def close(self):
+            return None
+
+    service = FocusService(
+        store=FileSessionStore(tmp_path), robot=OfflineRobot(), vision=None
+    )
+
+    await service.start()
+
+    assert (await service.health()).status == "unhealthy"
+    await service.close()

@@ -151,7 +151,7 @@ class StepFunVlmClient:
                         "enum": ["stable", "changed", "uncertain"],
                     },
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "evidence": {"type": "string", "maxLength": 12},
+                    "evidence": {"type": "string", "maxLength": 6},
                 },
                 "required": [
                     "frame_id",

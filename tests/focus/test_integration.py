@@ -128,6 +128,11 @@ async def test_accelerated_session_captures_two_batches_and_builds_report(
     completed = [
         event for event in events if event["type"] == "vision.batch_completed"
     ]
+    captured = [
+        event for event in events if event["type"] == "camera.frame_captured"
+    ]
+    assert captured[0]["data"]["frame_id"] == "f-0001"
+    assert session.session_id not in captured[0]["data"]["frame_id"]
     assert len(completed) >= 2
     assert len(completed[0]["data"]["observations"]) == 4
     assert completed[0]["data"]["model_name"] == "fake-step3"

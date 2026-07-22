@@ -44,8 +44,14 @@ class WatcheRobotAdapter:
 
     async def connect(self) -> None:
         async with self._connect_lock:
-            if self._robot is not None:
+            if self.connected:
                 return
+            stale, self._robot = self._robot, None
+            if stale is not None:
+                try:
+                    await asyncio.to_thread(stale.close)
+                except Exception:
+                    pass
             self._robot = await asyncio.to_thread(
                 self._factory,
                 pairing_code=self._pairing_code,

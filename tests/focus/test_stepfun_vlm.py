@@ -75,7 +75,7 @@ async def test_multimage_contract_preserves_order_and_constraints(tmp_path) -> N
     ]
     assert schema["properties"]["frames"]["minItems"] == 2
     assert schema["properties"]["frames"]["maxItems"] == 2
-    assert prefix[0]["properties"]["evidence"]["maxLength"] == 12
+    assert prefix[0]["properties"]["evidence"]["maxLength"] == 6
     content = requests[0]["messages"][1]["content"]
     image_urls = [
         part["image_url"]["url"] for part in content if part["type"] == "image_url"

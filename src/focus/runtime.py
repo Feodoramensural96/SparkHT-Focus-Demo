@@ -79,7 +79,29 @@ class FocusRuntime:
     async def start(self) -> None:
         await asyncio.gather(self.service.start(), self._prewarm_fast_chain())
         if self.voice is not None:
-            self._voice_task = asyncio.create_task(self.voice.run(), name="focus-voice")
+            self._voice_task = asyncio.create_task(
+                self._run_voice_supervisor(), name="focus-voice-supervisor"
+            )
+
+    async def _run_voice_supervisor(self) -> None:
+        assert self.robot is not None and self.voice is not None
+        while True:
+            if not self.robot.connected:
+                try:
+                    await self.robot.connect()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await asyncio.sleep(2.0)
+                    continue
+            try:
+                await self.voice.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await self.robot.close()
+            await asyncio.sleep(2.0)
 
     async def _prewarm_fast_chain(self) -> None:
         async def warm_asr() -> None:

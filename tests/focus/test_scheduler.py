@@ -96,3 +96,30 @@ async def test_discard_cancels_active_and_pending_without_retry() -> None:
     assert scheduler.pending_batch is None
     assert not scheduler.active
     await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_drain_waits_for_completion_callback_to_finish() -> None:
+    callback_started = asyncio.Event()
+    release_callback = asyncio.Event()
+
+    async def analyze(batch: list[str]) -> str:
+        return batch[0]
+
+    async def on_completed(result: str) -> None:
+        callback_started.set()
+        await release_callback.wait()
+
+    scheduler = VisionPriorityScheduler(
+        analyze, voice_idle_seconds=0.01, on_completed=on_completed
+    )
+    await scheduler.start()
+    scheduler.submit(["batch"])
+    await callback_started.wait()
+    drain = asyncio.create_task(scheduler.drain(timeout=1.0))
+    await asyncio.sleep(0.03)
+
+    assert not drain.done()
+    release_callback.set()
+    await drain
+    await scheduler.stop()

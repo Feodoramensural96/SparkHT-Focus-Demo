@@ -29,7 +29,7 @@ def response_schema_prompt(frame_ids: list[str]) -> str:
             "cup": "visible|not_visible|uncertain",
             "cup_motion": "stable|changed|uncertain",
             "confidence": 0.0,
-            "evidence": "不超过12个中文字",
+            "evidence": "不超过6个中文字",
         }
         for frame_id in frame_ids
     ]
@@ -46,7 +46,7 @@ def user_prompt(frame_ids: list[str], timestamps: list[datetime]) -> str:
     return (
         f"以下图片依次为 {ids}，拍摄时间依次为 {times}。\n"
         "逐帧观察，并比较相邻帧中的手机和杯子状态。\n"
-        "evidence 使用不超过 12 个中文字，只写可见证据。\n"
+        "evidence 使用不超过 6 个中文字，只写可见证据。\n"
         f"{response_schema_prompt(frame_ids)}"
     )
 

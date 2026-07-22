@@ -54,3 +54,10 @@
 - 模型自带模板会无条件进入长思维链。服务改用专用无思维链模板，并通过 JSON Schema 约束结构化输出；不展示或持久化完整思维链。
 - 实际加载识别 `StepVLForConditionalGeneration`、FP8 和 Cutlass FP8 kernel；权重加载约 82 秒，EngineCore 统一内存占用约 34.1 GiB。
 - 8040、8010、8030、11434 同时运行时系统约有 42 GiB 可用内存。
+
+## WatcheRobot 真机链路
+
+- Spark 同时拥有有线 `192.168.1.145/24` 和 Orulink Wi-Fi `192.168.1.130/24`；SDK 使用 `host=auto`，discovery 与 WebSocket 监听所有接口，首次配对成功。
+- 配对码只经隐藏标准输入进入进程环境，未写入 `.env`、systemd、日志或 Git。
+- 同一 SDK 对象依次取得麦克风首块、640×480 JPEG 并播放 PCM：0.386 秒、0.607 秒、1.895 秒。
+- 冒烟连接关闭后机器人未立即重新广播。运行时增加 SDK 连接监督循环，启动失败和断线后重新建立 discovery/WebSocket，不停止 8780 和本地模型健康检查。

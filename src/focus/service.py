@@ -85,7 +85,12 @@ class FocusService:
         if self._scheduler is not None:
             await self._scheduler.start()
         if self.robot is not None:
-            await self.robot.connect()
+            try:
+                await self.robot.connect()
+            except Exception:
+                # The runtime connection supervisor keeps retrying while HTTP and
+                # local model health endpoints remain available.
+                pass
 
     async def close(self) -> None:
         await self._cancel_background_tasks()
@@ -254,7 +259,7 @@ class FocusService:
         ):
             sequence += 1
             captured_at_ms = int(datetime.now(UTC).timestamp() * 1000)
-            frame_id = f"{session_id}_f-{sequence:04d}"
+            frame_id = f"f-{sequence:04d}"
             destination = (
                 self.store.frame_dir(session_id)
                 / f"{session_id}_{sequence:04d}_{captured_at_ms}.jpg"

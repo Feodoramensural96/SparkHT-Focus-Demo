@@ -74,7 +74,9 @@ class VisionPriorityScheduler(Generic[FrameT, ResultT]):
 
     @property
     def active(self) -> bool:
-        return self._active_task is not None and not self._active_task.done()
+        # Keep drain() blocked until on_completed has persisted the result, not only
+        # until the analyzer coroutine has produced it.
+        return self._current is not None
 
     async def drain(self, *, timeout: float = 30.0) -> None:
         async def wait_until_idle() -> None:

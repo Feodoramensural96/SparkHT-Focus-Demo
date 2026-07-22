@@ -99,3 +99,27 @@ async def test_camera_and_audio_share_one_robot_connection_and_capture_is_atomic
     assert frame.path == destination
     assert robot.audio_chunks == [b"\x00\x00" * 10, b"\x01\x00" * 10]
     assert adapter.last_playback_started_at is not None
+
+
+@pytest.mark.asyncio
+async def test_connect_replaces_a_disconnected_sdk_object() -> None:
+    first = FakeRobot()
+    second = FakeRobot()
+    robots = iter([first, second])
+    factory_calls = 0
+
+    def factory(**kwargs):
+        nonlocal factory_calls
+        factory_calls += 1
+        return next(robots)
+
+    adapter = WatcheRobotAdapter(pairing_code="123456", robot_factory=factory)
+    await adapter.connect()
+    first._closed = True
+
+    await adapter.connect()
+
+    assert factory_calls == 2
+    assert first.closed is True
+    assert adapter.connected is True
+    await adapter.close()
