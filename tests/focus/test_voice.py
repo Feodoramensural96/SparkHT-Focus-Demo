@@ -143,6 +143,48 @@ async def test_energy_vad_announces_listening_only_when_voice_starts() -> None:
     assert len(utterances) == 1
 
 
+@pytest.mark.asyncio
+async def test_energy_vad_does_not_change_face_for_unconfirmed_noise() -> None:
+    vad = EnergyVad(threshold=100, silence_chunks=1, min_voice_chunks=3)
+    states: list[str] = []
+
+    async def voice_started() -> None:
+        states.append("listening")
+
+    async def chunks():
+        yield b"\xe8\x03" * 20
+        yield b"\x00\x00" * 20
+
+    vad.on_voice_started = voice_started
+    utterances = [utterance async for utterance in vad.utterances(chunks())]
+
+    assert states == []
+    assert utterances == []
+
+
+@pytest.mark.asyncio
+async def test_energy_vad_changes_face_after_voice_is_confirmed() -> None:
+    vad = EnergyVad(threshold=100, silence_chunks=1, min_voice_chunks=3)
+    states: list[str] = []
+
+    async def voice_started() -> None:
+        states.append("listening")
+
+    async def chunks():
+        yield b"\xe8\x03" * 20
+        yield b"\xe8\x03" * 20
+        assert states == []
+        yield b"\xe8\x03" * 20
+        assert states == ["listening"]
+        yield b"\x00\x00" * 20
+
+    vad.on_voice_started = voice_started
+    utterances = [utterance async for utterance in vad.utterances(chunks())]
+
+    assert states == ["listening"]
+    assert len(utterances) == 1
+
+
 def test_vad_threshold_is_2500_only_while_focus_session_runs() -> None:
     service = FakeFocusService()
     vad = EnergyVad(threshold=500)

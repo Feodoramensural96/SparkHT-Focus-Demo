@@ -41,9 +41,12 @@ class EnergyVad:
                 else self.threshold
             )
             if level >= threshold:
-                if voiced == 0 and self.on_voice_started is not None:
-                    await self.on_voice_started()
                 voiced += 1
+                if (
+                    voiced == self.min_voice_chunks
+                    and self.on_voice_started is not None
+                ):
+                    await self.on_voice_started()
                 silence = 0
                 buffered.append(chunk)
             elif buffered:

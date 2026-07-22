@@ -30,7 +30,7 @@ class FocusSettings(BaseSettings):
     focus_normal_capture_interval_seconds: float = 30.0
     focus_batch_size: int = 4
     focus_voice_idle_seconds: float = 5.0
-    focus_vad_idle_threshold: int = Field(default=500, ge=1, le=32_767)
+    focus_vad_idle_threshold: int = Field(default=1_000, ge=1, le=32_767)
     focus_vad_threshold: int = Field(default=2_500, ge=1, le=32_767)
     focus_max_frames_per_session: int = 100
 
