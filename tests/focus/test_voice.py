@@ -84,6 +84,13 @@ class OneUtteranceVad:
         yield b"pcm"
 
 
+class PlaybackTimeoutRobot(FakeRobot):
+    async def play_pcm(self, chunks):
+        async for _ in chunks:
+            self.last_playback_started_at = time.monotonic()
+            raise TimeoutError("playback did not finish")
+
+
 class StreamingVad:
     async def utterances(self, chunks):
         async for chunk in chunks:
@@ -153,6 +160,41 @@ async def test_tts_failure_returns_text_and_records_degradation() -> None:
 
     assert "4 帧" in reply
     assert service.degraded == [("tts", "RuntimeError: tts offline")]
+
+
+@pytest.mark.asyncio
+async def test_playback_failure_preserves_observed_first_audio_latency() -> None:
+    service = FakeFocusService()
+    robot = PlaybackTimeoutRobot()
+    controller = VoiceController(
+        service=service, robot=robot, asr=None, llm=None, tts=FakeTts()
+    )
+
+    await controller.handle_transcript("统计到哪了")
+
+    completed = [
+        data for event, data in service.events if event == "voice.turn_completed"
+    ]
+    assert completed[-1]["speech_to_first_audio_ms"] >= 0
+    assert service.degraded == [("tts", "TimeoutError: playback did not finish")]
+
+
+@pytest.mark.asyncio
+async def test_single_character_noise_is_ignored_without_playback() -> None:
+    service = FakeFocusService()
+    robot = FakeRobot()
+    controller = VoiceController(
+        service=service, robot=robot, asr=None, llm=None, tts=FakeTts()
+    )
+
+    reply = await controller.handle_transcript("纸。")
+
+    assert reply == ""
+    assert robot.spoken == b""
+    completed = [
+        data for event, data in service.events if event == "voice.turn_completed"
+    ]
+    assert completed[-1]["ignored_short_transcript"] is True
 
 
 @pytest.mark.asyncio

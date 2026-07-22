@@ -163,4 +163,11 @@ class WatcheRobotAdapter:
         )
         if self.last_playback_started_at is None:
             self.last_playback_started_at = time.monotonic()
-        await asyncio.to_thread(playback.wait, 10.0)
+        try:
+            await asyncio.to_thread(playback.wait, 10.0)
+        except Exception:
+            try:
+                await asyncio.to_thread(robot.audio.stop)
+            except Exception:
+                pass
+            raise

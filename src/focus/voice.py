@@ -6,7 +6,7 @@ import time
 from array import array
 from collections.abc import AsyncIterator
 
-from .intent import FocusIntent, match_focus_intent
+from .intent import FocusIntent, match_focus_intent, normalize_zh_text
 from .models import FocusSessionCreate, SessionState
 from .ports import AsrPort, LlmPort, RobotPort, TtsPort
 from .service import FocusService
@@ -134,6 +134,19 @@ class VoiceController:
         if emit is not None and active is not None:
             emit("voice.turn_started", {"transcript": transcript[:80]})
 
+        if intent is None and len(normalize_zh_text(transcript)) < 2:
+            if emit is not None:
+                emit(
+                    "voice.turn_completed",
+                    {
+                        "transcript": transcript[:80],
+                        "intent": None,
+                        "speech_to_first_audio_ms": None,
+                        "ignored_short_transcript": True,
+                    },
+                )
+            return ""
+
         if intent is FocusIntent.START:
             session, reused = await self.service.create_session(FocusSessionCreate())
             if emit is not None and active is None:
@@ -187,15 +200,13 @@ class VoiceController:
         if self.tts is not None:
             try:
                 await self.robot.play_pcm(self.tts.synthesize(reply))
-                playback_started_at = getattr(
-                    self.robot, "last_playback_started_at", None
-                )
-                if playback_started_at is not None:
-                    speech_to_first_audio_ms = round(
-                        (playback_started_at - speech_ended_at) * 1000
-                    )
             except Exception as error:
                 self.service.mark_degraded("tts", self._failure_reason(error))
+            playback_started_at = getattr(self.robot, "last_playback_started_at", None)
+            if playback_started_at is not None:
+                speech_to_first_audio_ms = round(
+                    (playback_started_at - speech_ended_at) * 1000
+                )
         if emit is not None:
             emit(
                 "voice.turn_completed",

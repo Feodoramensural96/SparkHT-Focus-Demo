@@ -6,11 +6,14 @@ from focus.infrastructure.watcher_sdk import WatcheRobotAdapter
 
 
 class FakePlayback:
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
         self.waited = False
+        self.fail = fail
 
     def wait(self, timeout=None):
         self.waited = True
+        if self.fail:
+            raise TimeoutError("playback timeout")
         return self
 
 
@@ -28,6 +31,8 @@ class FakeRobot:
     def __init__(self) -> None:
         self.capture_calls = 0
         self.audio_chunks: list[bytes] = []
+        self.audio_stop_calls = 0
+        self.fail_playback = False
         self.closed = False
         self._closed = False
         self.camera = self.Camera(self)
@@ -52,9 +57,10 @@ class FakeRobot:
 
         def play_pcm(self, data, **kwargs):
             self.parent.audio_chunks.append(data)
-            return FakePlayback()
+            return FakePlayback(fail=self.parent.fail_playback)
 
         def stop(self):
+            self.parent.audio_stop_calls += 1
             return None
 
     class Microphone:
@@ -122,4 +128,24 @@ async def test_connect_replaces_a_disconnected_sdk_object() -> None:
     assert factory_calls == 2
     assert first.closed is True
     assert adapter.connected is True
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_playback_timeout_stops_stale_robot_audio() -> None:
+    robot = FakeRobot()
+    robot.fail_playback = True
+    adapter = WatcheRobotAdapter(
+        pairing_code="123456", robot_factory=lambda **kwargs: robot
+    )
+    await adapter.connect()
+
+    async def chunks():
+        yield b"\x00\x00" * 10
+
+    with pytest.raises(TimeoutError, match="playback timeout"):
+        await adapter.play_pcm(chunks())
+
+    assert adapter.last_playback_started_at is not None
+    assert robot.audio_stop_calls == 1
     await adapter.close()

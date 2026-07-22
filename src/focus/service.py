@@ -165,8 +165,9 @@ class FocusService:
             self._emit(session, "session.state_changed", {"state": session.state.value})
             await self._stop_sampling()
             tail = self.batch_builder.flush_tail()
-            if tail is not None and self._scheduler is not None:
-                self._scheduler.submit(tail)
+            if self._scheduler is not None:
+                if tail is not None:
+                    self._scheduler.submit(tail)
                 try:
                     await self._scheduler.drain(timeout=30.0)
                 except TimeoutError:
@@ -333,7 +334,6 @@ class FocusService:
         except Exception as error:
             reason = f"auto_summary_failed: {str(error)[:160]}"
             self.mark_degraded("tts", reason)
-            return
 
         playback_started_at = self.robot.last_playback_started_at
         first_audio_ms = (

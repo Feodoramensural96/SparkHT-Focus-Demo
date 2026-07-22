@@ -79,6 +79,18 @@ class FakeVision:
         )
 
 
+class GatedVision(FakeVision):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def analyze(self, frames) -> BatchAnalysis:
+        self.started.set()
+        await self.release.wait()
+        return await super().analyze(frames)
+
+
 class FakeTts:
     def synthesize(self, text):
         async def chunks():
@@ -125,17 +137,50 @@ async def test_accelerated_session_captures_two_batches_and_builds_report(
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    completed = [
-        event for event in events if event["type"] == "vision.batch_completed"
-    ]
-    captured = [
-        event for event in events if event["type"] == "camera.frame_captured"
-    ]
+    completed = [event for event in events if event["type"] == "vision.batch_completed"]
+    captured = [event for event in events if event["type"] == "camera.frame_captured"]
     assert captured[0]["data"]["frame_id"] == "f-0001"
     assert session.session_id not in captured[0]["data"]["frame_id"]
     assert len(completed) >= 2
     assert len(completed[0]["data"]["observations"]) == 4
     assert completed[0]["data"]["model_name"] == "fake-step3"
+
+
+@pytest.mark.asyncio
+async def test_finalization_drains_pending_batch_when_tail_has_only_one_frame(
+    tmp_path,
+) -> None:
+    vision = GatedVision()
+    service = FocusService(store=FileSessionStore(tmp_path), robot=None, vision=vision)
+    await service.start()
+    try:
+        session, _ = await service.create_session(FocusSessionCreate())
+        frames = [
+            CapturedFrame(
+                frame_id=f"f-{index:04d}",
+                captured_at=datetime.now(UTC),
+                path=tmp_path / f"f-{index:04d}.jpg",
+                sequence=index,
+                latency_ms=1,
+            )
+            for index in range(1, 6)
+        ]
+        assert service._scheduler is not None
+        service._scheduler.submit(frames[:4])
+        service.batch_builder.add(frames[4])
+        await asyncio.wait_for(vision.started.wait(), timeout=1)
+
+        stopping = asyncio.create_task(service.stop_session(session.session_id))
+        await asyncio.sleep(0)
+        assert not stopping.done()
+        vision.release.set()
+        await stopping
+
+        report = service.get_report(session.session_id)
+        assert report.analyzed_frames == 4
+        assert vision.calls == 1
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio
