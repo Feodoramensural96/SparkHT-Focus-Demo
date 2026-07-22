@@ -75,6 +75,8 @@ def test_dashboard_uses_ultrawide_regions_and_real_model_name(tmp_path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     for text in (
+        "创造专注",
+        "WatcheRobot · 多模态识别 &amp; 专注反馈",
         "机器人原始画面",
         "核心指标",
         "机器人对话",

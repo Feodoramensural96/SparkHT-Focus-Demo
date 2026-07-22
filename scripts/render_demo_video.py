@@ -96,13 +96,13 @@ def build_scenes(session_dir: Path) -> tuple[list[Scene], list[Path]]:
     duration_minutes = session["duration_seconds"] / 60
     scenes = [
         Scene(
-            "看见专注",
+            "创造专注",
             (
                 "DGX Spark 端侧快慢双系统",
                 "WatcheRobot · 640×480 · Step3-VL-10B-FP8",
                 "真实会话数据生成 · 不依赖 WatcheRobot_server",
             ),
-            "这是看见专注。系统运行在单台 DGX Spark 上，机器人只建立一个 Python SDK 连接。摄像头只有六百四十乘四百八十，因此我们不做文字、身份或情绪识别，只观察人物、明显手机和杯子等低分辨率下可靠的大目标变化。",
+            "这是创造专注。系统运行在单台 DGX Spark 上，机器人只建立一个 Python SDK 连接。摄像头只有六百四十乘四百八十，因此我们不做文字、身份或情绪识别，只观察人物、明显手机和杯子等低分辨率下可靠的大目标变化。",
             0,
         ),
         Scene(

@@ -173,7 +173,7 @@ _DASHBOARD_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>看见专注 · SparkHT</title>
+<title>创造专注 · SparkHT</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;background:#06101d;color:#edf4ff;--line:#223b59;--muted:#8fa7c6;--blue:#62adff;--up:#2dd4bf;--down:#a78bfa;--danger:#fb7185}
 *{box-sizing:border-box}html{scrollbar-gutter:stable}body{margin:0;min-height:100vh;background:radial-gradient(circle at 45% -20%,#183c63 0,#0b1a2d 36%,#06101d 75%);line-height:1.42}
@@ -195,7 +195,7 @@ _DASHBOARD_HTML = """<!doctype html>
 <body>
 <main class="shell">
   <header class="top">
-    <div class="top__title"><h1>看见专注</h1><div class="eyebrow">SparkHT · On-device focus</div></div>
+    <div class="top__title"><h1>创造专注</h1><div class="eyebrow">WatcheRobot · 多模态识别 &amp; 专注反馈</div></div>
     <div class="topline">
       <span class="topline__copy">端侧快慢双系统机器人 · 带鱼屏横向全景监控</span>
       <span class="pill">Step3-VL-10B-FP8</span>

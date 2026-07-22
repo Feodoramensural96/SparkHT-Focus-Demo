@@ -1,16 +1,33 @@
-# Seeing Focus
+# Creating Focus: Multimodal Recognition & Focus Feedback with WatcheRobot
 
 [![CI](https://github.com/orulink-ai/SparkHT-Focus-Demo/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/orulink-ai/SparkHT-Focus-Demo/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg)](https://www.python.org/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-D22128.svg)](LICENSE)
 
-> Give WatcheRobot low-latency Chinese conversation and continuous multimodal observation on one NVIDIA DGX Spark.
+> Let a desktop robot help you protect a stretch of uninterrupted time.
 
 English | [简体中文](README.md)
 
-SparkHT Focus is an independent edge-side Python orchestration service for a hackathon demo. Its fast path handles low-latency Chinese voice interaction. Its slow path analyzes periodic 640×480 robot-camera frames with StepFun's open Step3-VL-10B-FP8 model. Deterministic Python code—not the model—then aggregates presence, visible-phone, and focus-proxy metrics.
+Creating Focus is ORULINK's desktop companion for the second NVIDIA DGX Spark Hackathon. Say “start focusing” and the robot quietly accompanies you; when the session ends, it turns low-frequency multimodal observations into restrained, honest feedback. It is designed to reduce screen attention rather than become another screen-bound productivity app.
+
+SparkHT Focus is the independent edge-side Python service behind that experience. Its fast path handles low-latency Chinese voice interaction. Its slow path analyzes periodic 640×480 robot-camera frames with StepFun's open Step3-VL-10B-FP8 model. Deterministic Python code—not the model—then aggregates presence, visible-phone, and focus-proxy metrics.
 
 All model services, scheduling, the robot gateway, and the dashboard run locally on DGX Spark. The project is independent of `WatcheRobot_server`; one connection to the robot's `sdk.control.app` carries microphone audio, camera frames, speaker audio, facial animations, and servo actions.
+
+## Project brief
+
+| Item | Detail |
+|---|---|
+| Event | Second NVIDIA DGX Spark Hackathon |
+| Theme | Let Agents Create Everything · Multimodal Agent Creative Challenge |
+| Team | ORULINK |
+| Project | Creating Focus: a desktop companion for multimodal recognition and focus feedback |
+| Direction | Create a lower-distraction focus environment and provide sincere feedback |
+| Stack | WatcheRobot embodiment + SparkHT orchestration + local NVIDIA DGX Spark model services |
+
+## What we want to create
+
+The hackathon asks what agents can create. Our answer is not more text or more images, but **a period of genuine focus**. Most focus tools live on the same screen that already competes for attention. Creating Focus moves the interaction to a quiet desktop companion: it helps you enter the session, observes at a deliberately low frequency, and speaks only when you ask or when the session ends.
 
 ## DGX Spark × NVIDIA × StepFun
 
@@ -27,7 +44,20 @@ NVIDIA specifies [DGX Spark](https://www.nvidia.com/en-us/products/workstations/
 
 StepFun's role is specifically the slow vision system. Step3-VL emits structured facts such as `person_present`, `phone_visible`, `cup_state`, and confidence. Thresholding, temporal aggregation, session rules, and the final proxy score remain deterministic application code in this repository. The fast path currently uses local Qwen-family ASR, short-dialogue, and TTS services; those components are not attributed to StepFun.
 
-## Highlights
+## Solution
+
+The delivered system uses three layers without modifying the existing ESP32/STM32 firmware:
+
+| Layer | Core components | Responsibility | Output |
+|---|---|---|---|
+| Embodied interaction | WatcheRobot Python SDK | Microphone, 640×480 capture, audio, lights, expressions, and motion | Timestamped media and embodied feedback |
+| Fast path | Qwen ASR, Ollama `qwen3:0.6b`, Qwen3-TTS 0.6B | Chinese speech, deterministic commands, short dialogue, and spoken replies | Replies capped at 60 Chinese characters |
+| Slow path | Step3-VL-10B-FP8 + vLLM | Four-frame temporal observation of person, visible phone, and cup state | JSON Schema-constrained facts |
+| Statistics and UI | SparkHT FastAPI + Web dashboard | Scheduling, aggregation, health, degradation, and reporting | Focus proxy, event history, and spoken summary |
+
+Demo mode runs for 90 seconds, captures every 10 seconds, and forms a vision batch from four frames. Normal mode defaults to 25 minutes with a 30-second capture interval. Speech preempts slow work; after the voice path becomes idle, only the newest pending vision batch is resumed.
+
+### Delivered features
 
 - Start, query, stop, or cancel a focus session by voice.
 - Run short conversations through Ollama `qwen3:0.6b` with trusted live statistics only.
@@ -37,6 +67,12 @@ StepFun's role is specifically the slow vision system. Step3-VL emits structured
 - Play a focus animation and a head-up/nod/neutral gesture when a session starts, then actively maintain the focus expression from the SparkHT state machine.
 - Pair the robot at runtime from the Web status card without restarting the gateway or persisting the six-digit code.
 - Store sessions, events, frames, and reports locally on the Spark.
+
+## Typical flow
+
+1. **Start by voice.** Deterministic Chinese intent matching handles start, stop, cancel, and status commands before ordinary dialogue reaches the lightweight LLM. The robot replies, enters its focus expression, and performs a head-up/nod/neutral gesture.
+2. **Accumulate multimodal observations.** Step3-VL analyzes ordered low-frequency frames. Deterministic code, rather than the model, aggregates presence, visible-phone, phone-state changes, and possible cup movement.
+3. **Provide low-interruption feedback.** Status questions preempt the slow path. At the end, the dashboard receives a full report and the robot speaks a short summary. Cup changes remain “possible movement,” never a claim that the user drank.
 
 ## Architecture
 
@@ -59,6 +95,14 @@ flowchart LR
 
     CUDA["NVIDIA CUDA · PyTorch · FP8/CUTLASS"] -. "acceleration" .-> Step3
 ```
+
+## Key implementation choices
+
+- **One SDK gateway:** a single SparkHT-owned connection carries microphone, camera, PCM playback, lights, expressions, and motion, avoiding competition between robot foreground apps.
+- **Voice-first fast path:** the delivered build uses Qwen ASR at `127.0.0.1:8010`; Paraformer was evaluated during planning but is not presented as an automatic fallback. Ordinary dialogue uses Ollama `qwen3:0.6b`, and Qwen3-TTS replies are capped at 60 Chinese characters. The gateway buffers each short PCM reply because SDK v1 requires total bytes and SHA before playback.
+- **Bounded StepFun slow path:** Step3-VL-FP8 runs at `127.0.0.1:8040` with one sequence, at most four images, a 4096-token context, and 192 output tokens. A no-long-reasoning template and JSON Schema keep the result bounded. BF16 Transformers remains a manual deployment contingency, not an automatic runtime model switch.
+- **Deterministic metrics:** the slow queue has depth one and keeps only the newest batch. Python computes `100 × (0.7 × presence ratio + 0.3 × (1 - visible-phone ratio))`; this is a low-resolution proxy, not a medical, educational, HR, or productivity assessment.
+- **Local lifecycle:** sessions contain at most 100 frames. Startup and completed-session cleanup remove session directories older than 24 hours; raw microphone audio is not persisted by default.
 
 ## Why edge-local
 

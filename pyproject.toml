@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sparkht-focus"
 version = "0.1.0"
-description = "SparkHT 端侧快慢双系统专注统计 Demo"
+description = "创造专注：WatcheRobot 多模态识别 & 专注反馈 Demo"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
