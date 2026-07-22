@@ -14,7 +14,7 @@ dependencies = [
   "pydantic-settings>=2.8,<3",
   "python-multipart>=0.0.20,<1",
   "uvicorn[standard]>=0.34,<1",
-  "watcherobot>=0.1.0a4,<0.2",
+  "watcherobot==0.1.0a4",
 ]
 
 [project.scripts]
