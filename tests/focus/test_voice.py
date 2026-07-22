@@ -46,6 +46,26 @@ class FakeFocusService:
         self.degraded.append((component, reason))
 
 
+class SessionAwareFocusService(FakeFocusService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.session.state = SessionState.COMPLETED
+        self.event_sessions: list[tuple[str, str]] = []
+
+    async def create_session(self, request):
+        self.session = FocusSession(
+            session_id="fs_new",
+            mode=FocusMode.DEMO,
+            duration_seconds=90,
+            state=SessionState.RUNNING,
+        )
+        return self.session, False
+
+    def emit_voice_event(self, event_type, data):
+        self.events.append((event_type, data))
+        self.event_sessions.append((event_type, self.session.session_id))
+
+
 class FakeRobot:
     def __init__(self) -> None:
         self.spoken = b""
@@ -147,6 +167,26 @@ async def test_deterministic_start_status_stop_and_voice_priority() -> None:
         data for event, data in service.events if event == "voice.turn_completed"
     ]
     assert all(item["speech_to_first_audio_ms"] >= 0 for item in completed)
+    assert [item["reply"] for item in completed] == [
+        "好的，已开始专注统计，我会在结束时告诉你结果。",
+        "目前已采集 0 帧，分析 4 帧。",
+        "统计完成：在位率 90% ，手机可见率 10% ，专注趋势 88 分。",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_after_completed_session_emits_both_directions_to_new_session() -> None:
+    service = SessionAwareFocusService()
+    controller = VoiceController(
+        service=service, robot=FakeRobot(), asr=None, llm=None, tts=FakeTts()
+    )
+
+    await controller.handle_transcript("开始专注")
+
+    assert service.event_sessions == [
+        ("voice.turn_started", "fs_new"),
+        ("voice.turn_completed", "fs_new"),
+    ]
 
 
 @pytest.mark.asyncio

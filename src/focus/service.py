@@ -347,6 +347,7 @@ class FocusService:
             {
                 "source": "session_timer",
                 "intent": "auto_summary",
+                "reply": reply[:120],
                 "speech_to_first_audio_ms": first_audio_ms,
             },
         )

@@ -216,6 +216,7 @@ async def test_duration_timer_speaks_exactly_one_completed_summary(tmp_path) -> 
     ]
     assert len(summaries) == 1
     assert summaries[0]["data"]["source"] == "session_timer"
+    assert summaries[0]["data"]["reply"].startswith("统计完成")
     assert summaries[0]["data"]["speech_to_first_audio_ms"] >= 0
 
 

@@ -46,6 +46,17 @@ class FileSessionStore:
         raw = (self.session_dir(session_id) / "report.json").read_text(encoding="utf-8")
         return FocusReport.model_validate_json(raw)
 
+    def latest_session(self) -> FocusSession:
+        sessions = [
+            FocusSession.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in self.root.glob("*/session.json")
+            if path.is_file()
+        ]
+        if not sessions:
+            raise FileNotFoundError("no persisted session")
+        observed = [session for session in sessions if session.stats.analyzed_frames > 0]
+        return max(observed or sessions, key=lambda session: session.created_at)
+
     def append_event(self, event: FocusEvent) -> None:
         directory = self.session_dir(event.session_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -53,6 +64,13 @@ class FileSessionStore:
             stream.write(event.model_dump_json() + "\n")
             stream.flush()
             os.fsync(stream.fileno())
+
+    def load_events(self, session_id: str, *, limit: int = 200) -> list[FocusEvent]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        path = self.session_dir(session_id) / "events.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return [FocusEvent.model_validate_json(line) for line in lines[-limit:]]
 
     def mark_unfinished_interrupted(self) -> list[str]:
         changed: list[str] = []

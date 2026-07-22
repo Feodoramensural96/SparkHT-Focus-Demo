@@ -18,6 +18,7 @@ def make_client(tmp_path: Path) -> tuple[TestClient, FocusService]:
 def test_create_reuses_active_session_and_stop_is_idempotent(tmp_path) -> None:
     client, _ = make_client(tmp_path)
     assert client.get("/api/focus/active").status_code == 404
+    assert client.get("/api/focus/recent").status_code == 404
     first = client.post(
         "/api/focus/sessions", json={"mode": "demo", "duration_seconds": 90}
     )
@@ -37,11 +38,13 @@ def test_create_reuses_active_session_and_stop_is_idempotent(tmp_path) -> None:
     assert stopped.status_code == 200
     assert stopped.json()["state"] == "completed"
     assert client.post(f"/api/focus/sessions/{session_id}/stop").status_code == 200
+    assert client.get("/api/focus/active").status_code == 404
 
     report = client.get(f"/api/focus/sessions/{session_id}/report")
     assert report.status_code == 200
     assert report.json()["focus_proxy_score"] is None
     assert "有效视觉样本不足" in report.json()["summary"]
+    assert client.get("/api/focus/recent").json()["session_id"] == session_id
 
 
 def test_cancel_is_idempotent_and_has_no_report(tmp_path) -> None:
@@ -67,24 +70,57 @@ def test_health_is_unhealthy_without_sdk_but_model_degradation_is_distinct(
     assert response.json()["components"]["stepfun_vlm"]["status"] == "degraded"
 
 
-def test_dashboard_contains_four_regions_and_real_model_name(tmp_path) -> None:
+def test_dashboard_uses_compact_vertical_regions_and_real_model_name(tmp_path) -> None:
     client, _ = make_client(tmp_path)
     response = client.get("/")
     assert response.status_code == 200
-    for text in ("最新画面", "核心指标", "时间线", "技术状态", "Step3-VL-10B-FP8"):
+    for text in (
+        "机器人原始画面",
+        "核心指标",
+        "机器人对话",
+        "事件时间线",
+        "技术状态",
+        "Step3-VL-10B-FP8",
+        "机器人上行 · 麦克风 → SparkHT",
+        "机器人下行 · SparkHT → 扬声器",
+    ):
         assert text in response.text
     assert "fetch('/api/focus/active')" in response.text
+    assert "fetch('/api/focus/recent')" in response.text
     assert "最近 Step3 批次" in response.text
+    assert "display:flex;flex-direction:column" in response.text
+    assert "width:640px;max-width:100%;aspect-ratio:4/3" in response.text
+    assert "grid-template-columns" not in response.text
     for element_id in (
         "frame",
         "presence",
         "phone",
+        "phoneTransitions",
         "drink",
         "score",
+        "conversation",
         "timeline",
         "health",
     ):
         assert f'id="{element_id}"' in response.text
+
+
+def test_event_history_reads_persisted_events(tmp_path) -> None:
+    client, service = make_client(tmp_path)
+    service.store.append_event(
+        FocusEvent(
+            event_id="evt-history",
+            session_id="fs_history",
+            type="voice.turn_completed",
+            data={"reply": "这是机器人下行回复。"},
+        )
+    )
+
+    response = client.get("/api/focus/sessions/fs_history/history")
+
+    assert response.status_code == 200
+    assert response.json()[0]["event_id"] == "evt-history"
+    assert response.json()[0]["data"]["reply"] == "这是机器人下行回复。"
 
 
 def test_event_hub_replays_after_last_event_id() -> None:

@@ -131,7 +131,13 @@ class VoiceController:
         if active is None:
             active = getattr(self.service, "session", None)
         emit = getattr(self.service, "emit_voice_event", None)
-        if emit is not None and active is not None:
+        active_is_live = active is not None and active.state not in {
+            SessionState.COMPLETED,
+            SessionState.CANCELLED,
+            SessionState.FAILED,
+        }
+        starts_new_session = intent is FocusIntent.START and not active_is_live
+        if emit is not None and active is not None and not starts_new_session:
             emit("voice.turn_started", {"transcript": transcript[:80]})
 
         if intent is None and len(normalize_zh_text(transcript)) < 2:
@@ -149,7 +155,7 @@ class VoiceController:
 
         if intent is FocusIntent.START:
             session, reused = await self.service.create_session(FocusSessionCreate())
-            if emit is not None and active is None:
+            if emit is not None and starts_new_session:
                 emit("voice.turn_started", {"transcript": transcript[:80]})
             if session.state is SessionState.FAILED:
                 reply = "机器人连接或相机暂时不可用，专注统计未能启动。"
@@ -212,6 +218,7 @@ class VoiceController:
                 "voice.turn_completed",
                 {
                     "transcript": transcript[:80],
+                    "reply": reply[:120],
                     "intent": intent.value if intent else None,
                     "speech_to_first_audio_ms": speech_to_first_audio_ms,
                 },
