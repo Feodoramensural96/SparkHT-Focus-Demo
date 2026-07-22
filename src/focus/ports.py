@@ -39,7 +39,13 @@ class AsrPort(Protocol):
 
 
 class LlmPort(Protocol):
-    async def reply(self, text: str, *, max_chinese_chars: int = 60) -> str: ...
+    async def reply(
+        self,
+        text: str,
+        *,
+        max_chinese_chars: int = 60,
+        focus_context: str | None = None,
+    ) -> str: ...
     async def health(self) -> bool: ...
 
 

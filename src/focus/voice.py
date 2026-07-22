@@ -224,7 +224,11 @@ class VoiceController:
                 reply = "已取消本次专注统计，不会生成评分。"
         elif self.llm is not None:
             try:
-                reply = await self.llm.reply(transcript, max_chinese_chars=60)
+                reply = await self.llm.reply(
+                    transcript,
+                    max_chinese_chars=60,
+                    focus_context=self._focus_context(active),
+                )
             except Exception as error:
                 self.service.mark_degraded("ollama", self._failure_reason(error))
                 reply = "我听到了，但当前对话服务暂时不可用。"
@@ -254,6 +258,32 @@ class VoiceController:
                 },
             )
         return reply
+
+    @staticmethod
+    def _focus_context(active) -> str:
+        """Render trusted runtime state for the conversational model."""
+        if active is None:
+            return "当前没有正在进行的专注统计。"
+
+        state_copy = {
+            SessionState.RUNNING: "专注统计进行中",
+            SessionState.FINALIZING: "专注统计正在生成总结",
+            SessionState.COMPLETED: "当前没有正在专注，最近一轮统计已完成",
+            SessionState.CANCELLED: "当前没有正在专注，最近一轮统计已取消",
+            SessionState.FAILED: "当前没有正在专注，最近一轮统计失败",
+        }.get(active.state, f"专注统计状态为 {active.state.value}")
+        parts = [
+            state_copy,
+            f"已采集 {active.captured_frames} 帧",
+            f"已分析 {active.stats.analyzed_frames} 帧",
+        ]
+        if active.stats.presence_ratio is not None:
+            parts.append(f"在位率 {active.stats.presence_ratio * 100:.0f}%")
+        if active.stats.phone_visible_ratio is not None:
+            parts.append(f"手机可见率 {active.stats.phone_visible_ratio * 100:.0f}%")
+        if active.stats.focus_proxy_score is not None:
+            parts.append(f"专注趋势 {active.stats.focus_proxy_score:.0f} 分")
+        return "；".join(parts) + "。"
 
     def _sync_vad_threshold(self) -> None:
         """Use stricter voice triggering while a focus session is active."""

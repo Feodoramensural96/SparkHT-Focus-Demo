@@ -29,11 +29,22 @@ async def test_ollama_limits_reply_to_sixty_chinese_characters() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["model"] == "qwen3:0.6b"
+        system_prompt = payload["messages"][0]["content"]
+        assert "当前实时专注状态：专注统计进行中；已采集 8 帧" in system_prompt
+        assert "不要猜测或编造" in system_prompt
         return httpx.Response(200, json={"message": {"content": "好" * 80}})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = OllamaClient(http=http, base_url="http://ollama", model="qwen3:0.6b")
-        assert len(await client.reply("你好")) == 60
+        assert (
+            len(
+                await client.reply(
+                    "我现在表现怎么样",
+                    focus_context="专注统计进行中；已采集 8 帧。",
+                )
+            )
+            == 60
+        )
 
 
 @pytest.mark.asyncio

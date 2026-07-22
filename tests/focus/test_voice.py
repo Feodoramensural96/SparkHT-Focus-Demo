@@ -105,6 +105,15 @@ class BrokenAsr:
         raise RuntimeError("asr offline")
 
 
+class ContextAwareLlm:
+    def __init__(self) -> None:
+        self.focus_context = None
+
+    async def reply(self, text, *, max_chinese_chars=60, focus_context=None):
+        self.focus_context = focus_context
+        return "继续保持，很不错。"
+
+
 class OneUtteranceVad:
     async def utterances(self, chunks):
         yield b"pcm"
@@ -207,6 +216,32 @@ def test_vad_threshold_is_2500_only_while_focus_session_runs() -> None:
     # The provider is evaluated for every audio chunk, so an HTTP state change
     # applies even while the current microphone generator is already waiting.
     assert vad.threshold_provider() == 500
+
+
+@pytest.mark.asyncio
+async def test_general_conversation_receives_current_focus_state() -> None:
+    service = FakeFocusService()
+    service.session.captured_frames = 8
+    service.session.stats = FocusStats(
+        analyzed_frames=4,
+        presence_ratio=1.0,
+        phone_visible_ratio=0.25,
+        focus_proxy_score=92.5,
+    )
+    llm = ContextAwareLlm()
+    controller = VoiceController(
+        service=service,
+        robot=FakeRobot(),
+        asr=None,
+        llm=llm,
+        tts=None,
+    )
+
+    assert await controller.handle_transcript("我表现得怎么样") == "继续保持，很不错。"
+    assert llm.focus_context == (
+        "专注统计进行中；已采集 8 帧；已分析 4 帧；在位率 100%；"
+        "手机可见率 25%；专注趋势 92 分。"
+    )
 
 
 class SequencedAsr:
